@@ -245,7 +245,15 @@ def create_regimen(username: str):
             "updated_at": regimen.updated_at.isoformat(),
         }, 201
 
+@app.patch("/users/<username>/regimens/<regimen_id>")
+def modify_regimen(username: str):
+    # call Claude to modify the regimen
+    return {"ok": True}, 200
 
+@app.post("/users/<username>/workouts/<workout_id>/complete")
+def complete_workout(username: str):
+    # call Claude to complete the workout
+    return {"ok": True}, 200
 if __name__ == "__main__":
     init_db()
     app.run(debug=bool(int(os.getenv("FLASK_DEBUG", "1"))))
