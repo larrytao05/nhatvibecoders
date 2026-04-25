@@ -1,12 +1,17 @@
 import asyncio
+import os
 from typing import Type, TypeVar
 
 import anthropic
+from dotenv import load_dotenv
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
-_client = anthropic.AsyncAnthropic()
+load_dotenv()
+
+_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+_client = anthropic.AsyncAnthropic(api_key=_api_key)
 MODEL = "claude-sonnet-4-6"
 MAX_RETRIES = 3
 
