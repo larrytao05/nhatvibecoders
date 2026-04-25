@@ -29,6 +29,23 @@ class User(Base):
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
+class Regimen(Base):
+    __tablename__ = "Regimens"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    monday: Mapped[int] = mapped_column(Integer, nullable=False)
+    tuesday: Mapped[int] = mapped_column(Integer, nullable=False)
+    wednesday: Mapped[int] = mapped_column(Integer, nullable=False)
+    thursday: Mapped[int] = mapped_column(Integer, nullable=False)
+    friday: Mapped[int] = mapped_column(Integer, nullable=False)
+    saturday: Mapped[int] = mapped_column(Integer, nullable=False)
+    sunday: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
 class Workout(Base):
     __tablename__ = "Workouts"
 
