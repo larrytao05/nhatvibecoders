@@ -1,0 +1,252 @@
+{
+  "user": {
+    "id": 1,
+    "username": "demo-athlete",
+    "email": "demo@example.com",
+    "current_weight": 178,
+    "height": 70,
+    "estimated_bf": 16,
+    "created_at": "2026-04-25T12:00:00Z",
+    "updated_at": "2026-04-25T12:00:00Z"
+  },
+  "regimen": {
+    "id": 101,
+    "user_id": 1,
+    "name": "HTP Strength Recomposition",
+    "description": "Seven-day macro-plan generated from pasted history, goals, equipment, and recovery bandwidth.",
+    "theme": "strength_recomp",
+    "plan": {
+      "days": [
+        {
+          "id": "day-1",
+          "day_index": 1,
+          "title": "Upper Strength",
+          "focus": "Pressing strength, horizontal pull volume, shoulder stability",
+          "intensity": "High",
+          "workout_id": 201,
+          "notes": "Keep RPE around 8 on main compounds."
+        },
+        {
+          "id": "day-2",
+          "day_index": 2,
+          "title": "Lower Strength",
+          "focus": "Squat pattern, posterior chain, trunk bracing",
+          "intensity": "High",
+          "workout_id": 202,
+          "notes": "Longer rests on squats, no grinders."
+        },
+        {
+          "id": "day-3",
+          "day_index": 3,
+          "title": "Recovery + Mobility",
+          "focus": "Zone 2 cardio, hips, thoracic spine, breathing",
+          "intensity": "Low",
+          "workout_id": null,
+          "notes": "30 minutes easy movement."
+        },
+        {
+          "id": "day-4",
+          "day_index": 4,
+          "title": "Pull Hypertrophy",
+          "focus": "Lats, upper back, rear delts, biceps",
+          "intensity": "Medium",
+          "workout_id": 203,
+          "notes": "Chase full range and clean scapular motion."
+        },
+        {
+          "id": "day-5",
+          "day_index": 5,
+          "title": "Push Hypertrophy",
+          "focus": "Chest, delts, triceps with moderate loads",
+          "intensity": "Medium",
+          "workout_id": 204,
+          "notes": "Stop one rep before form breaks."
+        },
+        {
+          "id": "day-6",
+          "day_index": 6,
+          "title": "Athletic Lower",
+          "focus": "Hinge power, unilateral legs, calves, core",
+          "intensity": "Medium",
+          "workout_id": 205,
+          "notes": "Move explosively on hinge work."
+        },
+        {
+          "id": "day-7",
+          "day_index": 7,
+          "title": "Full Rest",
+          "focus": "Sleep, steps, meal prep, tissue quality",
+          "intensity": "Low",
+          "workout_id": null,
+          "notes": "No formal lifting."
+        }
+      ]
+    },
+    "created_at": "2026-04-25T12:00:00Z",
+    "updated_at": "2026-04-25T12:00:00Z"
+  },
+  "replacementRegimen": {
+    "id": 102,
+    "user_id": 1,
+    "name": "HTP Shoulder-Friendly Rebuild",
+    "description": "Adjusted plan after user feedback with lower pressing fatigue and more recovery spacing.",
+    "theme": "adaptive_rebuild",
+    "plan": {
+      "days": [
+        {
+          "id": "day-1",
+          "day_index": 1,
+          "title": "Upper Pull Priority",
+          "focus": "Rows, lats, rear delts before light pressing",
+          "intensity": "Medium",
+          "workout_id": 203,
+          "notes": "Use neutral grips if shoulders feel cranky."
+        },
+        {
+          "id": "day-2",
+          "day_index": 2,
+          "title": "Lower Strength",
+          "focus": "Squat pattern, posterior chain, trunk bracing",
+          "intensity": "High",
+          "workout_id": 202,
+          "notes": "Main lower day stays heavy."
+        },
+        {
+          "id": "day-3",
+          "day_index": 3,
+          "title": "Recovery + Mobility",
+          "focus": "Shoulder CARs, zone 2, hips, breathing",
+          "intensity": "Low",
+          "workout_id": null,
+          "notes": "Treat this as plan-critical work."
+        },
+        {
+          "id": "day-4",
+          "day_index": 4,
+          "title": "Technique Push",
+          "focus": "Tempo pressing, serratus work, triceps",
+          "intensity": "Medium",
+          "workout_id": 204,
+          "notes": "Slow eccentrics, no painful ranges."
+        },
+        {
+          "id": "day-5",
+          "day_index": 5,
+          "title": "Athletic Lower",
+          "focus": "Hinge power, unilateral legs, calves, core",
+          "intensity": "Medium",
+          "workout_id": 205,
+          "notes": "Keep jumps crisp and low volume."
+        },
+        {
+          "id": "day-6",
+          "day_index": 6,
+          "title": "Optional Pump",
+          "focus": "Arms, delts, weak points, easy conditioning",
+          "intensity": "Low",
+          "workout_id": 206,
+          "notes": "Skip if recovery is lagging."
+        },
+        {
+          "id": "day-7",
+          "day_index": 7,
+          "title": "Full Rest",
+          "focus": "Sleep, steps, meal prep, tissue quality",
+          "intensity": "Low",
+          "workout_id": null,
+          "notes": "No formal lifting."
+        }
+      ]
+    },
+    "created_at": "2026-04-25T12:00:00Z",
+    "updated_at": "2026-04-25T12:00:00Z"
+  },
+  "workouts": [
+    {
+      "id": 201,
+      "user_id": 1,
+      "mood": "focused",
+      "muscles_worked": "chest, back, shoulders, triceps",
+      "created_at": "2026-04-25T12:00:00Z",
+      "updated_at": "2026-04-25T12:00:00Z",
+      "exercises": [
+        { "id": 301, "workout_id": 201, "name": "Barbell Bench Press", "sets": 4, "reps": 5, "weight": 185, "rest_time": 150, "muscles_worked": "chest, triceps" },
+        { "id": 302, "workout_id": 201, "name": "Chest-Supported Row", "sets": 4, "reps": 8, "weight": 105, "rest_time": 90, "muscles_worked": "back" },
+        { "id": 303, "workout_id": 201, "name": "Half-Kneeling Landmine Press", "sets": 3, "reps": 8, "weight": 70, "rest_time": 75, "muscles_worked": "shoulders, core" }
+      ]
+    },
+    {
+      "id": 202,
+      "user_id": 1,
+      "mood": "steady",
+      "muscles_worked": "quads, glutes, hamstrings, core",
+      "created_at": "2026-04-25T12:00:00Z",
+      "updated_at": "2026-04-25T12:00:00Z",
+      "exercises": [
+        { "id": 304, "workout_id": 202, "name": "Back Squat", "sets": 5, "reps": 3, "weight": 245, "rest_time": 180, "muscles_worked": "quads, glutes" },
+        { "id": 305, "workout_id": 202, "name": "Romanian Deadlift", "sets": 4, "reps": 6, "weight": 205, "rest_time": 120, "muscles_worked": "hamstrings, glutes" },
+        { "id": 306, "workout_id": 202, "name": "Pallof Press", "sets": 3, "reps": 12, "weight": 35, "rest_time": 45, "muscles_worked": "core" }
+      ]
+    },
+    {
+      "id": 203,
+      "user_id": 1,
+      "mood": "dialed",
+      "muscles_worked": "lats, upper back, rear delts, biceps",
+      "created_at": "2026-04-25T12:00:00Z",
+      "updated_at": "2026-04-25T12:00:00Z",
+      "exercises": [
+        { "id": 307, "workout_id": 203, "name": "Weighted Pull-Up", "sets": 4, "reps": 6, "weight": 25, "rest_time": 120, "muscles_worked": "lats, biceps" },
+        { "id": 308, "workout_id": 203, "name": "Cable Row", "sets": 3, "reps": 12, "weight": 130, "rest_time": 75, "muscles_worked": "upper back" },
+        { "id": 309, "workout_id": 203, "name": "Rear Delt Fly", "sets": 3, "reps": 15, "weight": 20, "rest_time": 45, "muscles_worked": "rear delts" }
+      ]
+    },
+    {
+      "id": 204,
+      "user_id": 1,
+      "mood": "controlled",
+      "muscles_worked": "chest, delts, triceps",
+      "created_at": "2026-04-25T12:00:00Z",
+      "updated_at": "2026-04-25T12:00:00Z",
+      "exercises": [
+        { "id": 310, "workout_id": 204, "name": "Incline Dumbbell Press", "sets": 4, "reps": 10, "weight": 70, "rest_time": 90, "muscles_worked": "chest, shoulders" },
+        { "id": 311, "workout_id": 204, "name": "Cable Lateral Raise", "sets": 3, "reps": 14, "weight": 15, "rest_time": 45, "muscles_worked": "delts" },
+        { "id": 312, "workout_id": 204, "name": "Rope Pressdown", "sets": 3, "reps": 12, "weight": 55, "rest_time": 45, "muscles_worked": "triceps" }
+      ]
+    },
+    {
+      "id": 205,
+      "user_id": 1,
+      "mood": "athletic",
+      "muscles_worked": "hamstrings, glutes, calves, core",
+      "created_at": "2026-04-25T12:00:00Z",
+      "updated_at": "2026-04-25T12:00:00Z",
+      "exercises": [
+        { "id": 313, "workout_id": 205, "name": "Trap Bar Deadlift", "sets": 5, "reps": 3, "weight": 275, "rest_time": 150, "muscles_worked": "posterior chain" },
+        { "id": 314, "workout_id": 205, "name": "Rear-Foot Elevated Split Squat", "sets": 3, "reps": 8, "weight": 45, "rest_time": 90, "muscles_worked": "quads, glutes" },
+        { "id": 315, "workout_id": 205, "name": "Standing Calf Raise", "sets": 4, "reps": 12, "weight": 140, "rest_time": 45, "muscles_worked": "calves" }
+      ]
+    },
+    {
+      "id": 206,
+      "user_id": 1,
+      "mood": "easy",
+      "muscles_worked": "arms, delts, conditioning",
+      "created_at": "2026-04-25T12:00:00Z",
+      "updated_at": "2026-04-25T12:00:00Z",
+      "exercises": [
+        { "id": 316, "workout_id": 206, "name": "EZ-Bar Curl", "sets": 3, "reps": 12, "weight": 65, "rest_time": 45, "muscles_worked": "biceps" },
+        { "id": 317, "workout_id": 206, "name": "Face Pull", "sets": 3, "reps": 15, "weight": 45, "rest_time": 45, "muscles_worked": "rear delts, upper back" },
+        { "id": 318, "workout_id": 206, "name": "Sled Push", "sets": 6, "reps": 1, "weight": 135, "rest_time": 60, "muscles_worked": "conditioning" }
+      ]
+    }
+  ],
+  "screenCopy": {
+    "biometrics": "Capture the body stats the backend user model already supports.",
+    "goals": "Pick the planning objectives for the HTP prompt.",
+    "logistics": "Give the AI your weekly constraints and any existing routine.",
+    "schedule": "Tap a day to expand its high-level objective into workout tasks.",
+    "workout": "Log actual reps and loads against the planned exercise schema.",
+    "progress": "Placeholder health metrics and AI insights."
+  }
+}

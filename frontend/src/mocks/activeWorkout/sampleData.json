@@ -1,0 +1,22 @@
+{
+  "workout": {
+    "id": 201,
+    "user_id": 1,
+    "mood": "focused",
+    "muscles_worked": "chest, back, shoulders, triceps",
+    "created_at": "2026-04-25T12:00:00Z",
+    "updated_at": "2026-04-25T12:00:00Z",
+    "exercises": [
+      {
+        "id": 301,
+        "workout_id": 201,
+        "name": "Barbell Bench Press",
+        "sets": 4,
+        "reps": 5,
+        "weight": 185,
+        "rest_time": 150,
+        "muscles_worked": "chest, triceps"
+      }
+    ]
+  }
+}
