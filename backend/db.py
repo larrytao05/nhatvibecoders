@@ -37,7 +37,7 @@ class Regimen(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     user: Mapped["User"] = relationship("User", back_populates="regimens")
-
+    goals: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     theme: Mapped[str | None] = mapped_column(String(64), nullable=True)
