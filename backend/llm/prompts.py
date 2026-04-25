@@ -73,6 +73,7 @@ Planning notes: {day_plan.reasoning}
 
 <constraints>
 - Only select exercises from the available_exercises list above; do not invent new names
+- muscles_worked is derived automatically from the selected exercise names
 - Specify realistic values: sets, reps, weight in lbs, rest_time in seconds
 - notes: 3–5 words max, one key form cue only, or empty string if none needed
 - Choose exercise count and volume appropriate for the user's commitment and goals

@@ -74,6 +74,74 @@ def _parse_csv(value: Optional[str]) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _dedupe_muscles(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        cleaned = value.strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(cleaned)
+    return unique
+
+
+def _normalize_exercise_muscles(value: Any, exercise_name: Optional[str] = None) -> list[str]:
+    provided = normalize_muscle_groups(value)
+    if provided:
+        return provided
+    if exercise_name:
+        return get_exercise_muscles(exercise_name)
+    return []
+
+
+def _aggregate_workout_muscles(exercises: list[dict[str, Any]]) -> list[str]:
+    muscles: list[str] = []
+    for exercise in exercises:
+        if not isinstance(exercise, dict):
+            continue
+        muscles.extend(_normalize_exercise_muscles(exercise.get("muscles_worked"), exercise.get("name")))
+    return _dedupe_muscles(muscles)
+
+
+def _normalize_regimen_plan(plan: Any) -> Any:
+    if not isinstance(plan, dict):
+        return plan
+
+    workouts = plan.get("workouts")
+    if not isinstance(workouts, dict):
+        return plan
+
+    normalized_workouts: dict[str, list[dict[str, Any]]] = {}
+    for day, exercises in workouts.items():
+        if not isinstance(exercises, list):
+            normalized_workouts[day] = []
+            continue
+
+        normalized_workouts[day] = []
+        for exercise in exercises:
+            if not isinstance(exercise, dict):
+                continue
+            name = exercise.get("name")
+            normalized_workouts[day].append(
+                {
+                    **exercise,
+                    "muscles_worked": _normalize_exercise_muscles(
+                        exercise.get("muscles_worked"),
+                        name if isinstance(name, str) else None,
+                    ),
+                }
+            )
+
+    return {
+        **plan,
+        "workouts": normalized_workouts,
+    }
+
+
 def _build_research_context(username: str) -> Optional[dict[str, Any]]:
     with get_session() as session:
         user = session.query(User).filter_by(username=username).first()
@@ -215,10 +283,14 @@ def _suggest_questions_from_context(context: dict[str, Any]) -> list[str]:
         "I only have 35 minutes today - how should I modify this session?",
     ]
     if latest_workouts:
-        muscles = latest_workouts[0].get("muscles_worked", [])
+        muscles = {
+            muscle.casefold()
+            for muscle in latest_workouts[0].get("muscles_worked", [])
+            if isinstance(muscle, str)
+        }
         if "quads" in muscles or "hamstrings" in muscles:
             base.insert(0, "How should I recover after my last leg day?")
-        if "chest" in muscles or "shoulders" in muscles:
+        if {"upper chest", "lower chest", "front delt", "side delt", "rear delt"} & muscles:
             base.insert(0, "How do I protect shoulders on pressing days?")
     return base[:8]
 
@@ -487,7 +559,7 @@ def _generate_research_answer(question: str, context: dict[str, Any], style: str
     return llm_answer
 
 def _serialize_regimen(r: Regimen) -> dict[str, Any]:
-    plan = json.loads(r.plan_json) if r.plan_json else None
+    plan = _normalize_regimen_plan(json.loads(r.plan_json)) if r.plan_json else None
     return {
         "id": r.id,
         "user_id": r.user_id,
@@ -599,9 +671,7 @@ def log_workout(username: str):
     muscles_worked = payload.get("muscles_worked")
     exercises_payload = payload.get("exercises")
 
-    muscles_list = [str(x).strip() for x in _as_list(muscles_worked) if str(x).strip()]
-    if not muscles_list:
-        return {"error": "muscles_worked is required (string or list)"}, 400
+    muscles_list = _dedupe_muscles([str(x).strip() for x in _as_list(muscles_worked) if str(x).strip()])
 
     if not isinstance(exercises_payload, list) or len(exercises_payload) == 0:
         return {"error": "exercises must be a non-empty list"}, 400
@@ -611,7 +681,7 @@ def log_workout(username: str):
         if user is None:
             return {"error": "user not found"}, 404
 
-        workout = Workout(user_id=user.id, mood=mood, muscles_worked=", ".join(muscles_list))
+        normalized_exercises: list[dict[str, Any]] = []
 
         for idx, ex in enumerate(exercises_payload):
             if not isinstance(ex, dict):
@@ -622,7 +692,7 @@ def log_workout(username: str):
             weight = ex.get("weight")
             rest_time = ex.get("rest_time")
             ex_muscles = ex.get("muscles_worked", muscles_worked)
-            ex_muscles_list = [str(x).strip() for x in _as_list(ex_muscles) if str(x).strip()]
+            ex_muscles_list = _normalize_exercise_muscles(ex_muscles, name if isinstance(name, str) else None)
 
             if not isinstance(name, str) or not name.strip():
                 return {"error": f"exercises[{idx}].name is required"}, 400
@@ -637,14 +707,31 @@ def log_workout(username: str):
             if not ex_muscles_list:
                 return {"error": f"exercises[{idx}].muscles_worked is required"}, 400
 
+            normalized_exercises.append(
+                {
+                    "name": name.strip(),
+                    "sets": sets,
+                    "reps": reps,
+                    "weight": float(weight),
+                    "rest_time": rest_time,
+                    "muscles_worked": ex_muscles_list,
+                }
+            )
+
+        workout_muscles = _aggregate_workout_muscles(normalized_exercises) or muscles_list
+        if not workout_muscles:
+            return {"error": "muscles_worked is required (string or list)"}, 400
+
+        workout = Workout(user_id=user.id, mood=mood, muscles_worked=", ".join(workout_muscles))
+        for exercise in normalized_exercises:
             workout.exercises.append(
                 Exercise(
-                    name=name.strip(),
-                    sets=sets,
-                    reps=reps,
-                    weight=float(weight),
-                    rest_time=rest_time,
-                    muscles_worked=", ".join(ex_muscles_list),
+                    name=exercise["name"],
+                    sets=exercise["sets"],
+                    reps=exercise["reps"],
+                    weight=exercise["weight"],
+                    rest_time=exercise["rest_time"],
+                    muscles_worked=", ".join(exercise["muscles_worked"]),
                 )
             )
 
@@ -788,7 +875,7 @@ def create_regimen(username: str):
             flush=True,
         )
         try:
-            plan = asyncio.run(llm_create_regimen(onboarding))
+            plan = _normalize_regimen_plan(asyncio.run(llm_create_regimen(onboarding)))
         except Exception as exc:
             print(f"[LLM TEST] create_regimen failed for username={username!r}: {exc}", flush=True)
             return {"error": f"LLM call failed: {exc}"}, 502
@@ -844,7 +931,7 @@ def modify_regimen(username: str, regimen_id: int):
         if not regimen.plan_json:
             return {"error": "regimen has no plan"}, 400
 
-        plan = json.loads(regimen.plan_json)
+        plan = _normalize_regimen_plan(json.loads(regimen.plan_json))
         onboarding = plan.get("onboarding", {})
 
         try:
@@ -853,7 +940,7 @@ def modify_regimen(username: str, regimen_id: int):
             return {"error": f"LLM call failed: {exc}"}, 502
 
         try:
-            updated_plan = jsonpatch.apply_patch(plan, result["patches"])
+            updated_plan = _normalize_regimen_plan(jsonpatch.apply_patch(plan, result["patches"]))
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
             return {"error": f"patch application failed: {exc}", "patches": result["patches"]}, 422
 
@@ -889,10 +976,10 @@ def apply_patches(username: str, regimen_id: int):
         if not regimen.plan_json:
             return {"error": "regimen has no plan"}, 400
 
-        plan = json.loads(regimen.plan_json)
+        plan = _normalize_regimen_plan(json.loads(regimen.plan_json))
 
         try:
-            updated_plan = jsonpatch.apply_patch(plan, patches)
+            updated_plan = _normalize_regimen_plan(jsonpatch.apply_patch(plan, patches))
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
             return {"error": f"patch application failed: {exc}"}, 422
 

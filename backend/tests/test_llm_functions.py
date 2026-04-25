@@ -67,6 +67,15 @@ async def test_create_regimen_output_has_required_keys():
     assert "workouts" in result
 
 
+async def test_create_regimen_enriches_exercises_with_muscles_worked():
+    weekly = _make_weekly_plan(["Monday"])
+
+    with patch("llm.functions.query", new=AsyncMock(side_effect=[weekly, _make_day_workout("Monday")])):
+        result = await _import_create()
+
+    assert result["workouts"]["Monday"][0]["muscles_worked"] == ["Upper Chest", "Front Delt", "Triceps"]
+
+
 async def test_create_regimen_injects_onboarding_into_output():
     all_rest = _make_weekly_plan([])
 

@@ -1,5 +1,5 @@
 from typing import Any, Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── Step 1: high-level weekly plan ──────────────────────────────────────────
@@ -23,6 +23,7 @@ class ExerciseSpec(BaseModel):
     weight: float     # lbs
     rest_time: int    # seconds
     notes: str = ""
+    muscles_worked: list[str] = Field(default_factory=list)
 
 
 class DayWorkout(BaseModel):
