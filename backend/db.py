@@ -1,7 +1,7 @@
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 
@@ -94,6 +94,7 @@ class WorkoutLog(Base):
     regimen_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Regimens.id"), nullable=True, index=True)
     workout_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=True)
     user: Mapped["User"] = relationship("User", back_populates="logs")
+    log_date: Mapped[date] = mapped_column(Date, nullable=False)   # actual calendar date
     day: Mapped[str] = mapped_column(String(16), nullable=False)   # e.g. "Monday"
     observations: Mapped[str] = mapped_column(Text, nullable=False)
     modifications_json: Mapped[str | None] = mapped_column(Text, nullable=True)

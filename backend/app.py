@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+from datetime import date as date_type
+from typing import Any
 import re
 import urllib.error
 import urllib.request
@@ -475,6 +477,7 @@ def _serialize_log(log: WorkoutLog) -> dict[str, Any]:
         "user_id": log.user_id,
         "regimen_id": log.regimen_id,
         "workout_id": log.workout_id,
+        "log_date": log.log_date.isoformat() if log.log_date else None,
         "day": log.day,
         "observations": log.observations,
         "modifications": modifications,
@@ -685,9 +688,22 @@ def complete_workout(username: str, workout_id: int):
         onboarding = plan.get("onboarding", {})
         completed_workout_dict = _serialize_workout(workout)
 
+        # Fetch past logs so the LLM has historical context for trend-aware modifications
+        past_log_rows = (
+            session.query(WorkoutLog)
+            .filter_by(user_id=user.id)
+            .order_by(WorkoutLog.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        past_logs = [_serialize_log(row) for row in past_log_rows]
+
         try:
             log_entry = asyncio.run(
-                llm_complete_workout(onboarding, plan, completed_workout_dict, health_metrics, today_day.strip())
+                llm_complete_workout(
+                    onboarding, plan, completed_workout_dict,
+                    health_metrics, today_day.strip(), past_logs,
+                )
             )
         except Exception as exc:
             return {"error": f"LLM call failed: {exc}"}, 502
@@ -696,6 +712,7 @@ def complete_workout(username: str, workout_id: int):
             user_id=user.id,
             regimen_id=regimen_id,
             workout_id=workout_id,
+            log_date=date_type.today(),
             day=today_day.strip(),
             observations=log_entry["observations"],
             modifications_json=json.dumps(log_entry["modifications"]),

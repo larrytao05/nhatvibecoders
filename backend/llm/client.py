@@ -8,11 +8,8 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
-load_dotenv()
-
-_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
-_client = anthropic.AsyncAnthropic(api_key=_api_key)
-MODEL = "claude-sonnet-4-6"
+_client = anthropic.AsyncAnthropic()
+MODEL = "claude-haiku-4-5-20251001"
 MAX_RETRIES = 3
 
 
