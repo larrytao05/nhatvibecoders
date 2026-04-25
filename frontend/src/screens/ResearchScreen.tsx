@@ -44,7 +44,6 @@ export function ResearchScreen() {
     try {
       const suggested = await callApi<{ suggested_questions: string[] }>(`/users/${username}/research/suggestions`);
       setSuggestions(suggested.suggested_questions ?? []);
-      setStatusMessage("Loaded context and suggested questions.");
     } catch (error) {
       setStatusMessage(`Unable to load backend suggestions. (${String(error)})`);
       setSuggestions([
