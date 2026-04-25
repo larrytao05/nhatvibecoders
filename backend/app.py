@@ -1,6 +1,9 @@
 import os
 import json
-from typing import Any
+import re
+import urllib.error
+import urllib.request
+from typing import Any, Optional
 
 import flask
 from dotenv import load_dotenv
@@ -42,6 +45,403 @@ def _serialize_workout(w: Workout) -> dict[str, Any]:
         "created_at": w.created_at.isoformat(),
         "updated_at": w.updated_at.isoformat(),
     }
+
+
+def _safe_json_loads(raw: Optional[str]) -> Any:
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
+def _parse_csv(value: Optional[str]) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _build_research_context(username: str) -> Optional[dict[str, Any]]:
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return None
+
+        regimen = (
+            session.query(Regimen)
+            .filter_by(user_id=user.id)
+            .order_by(Regimen.created_at.desc())
+            .first()
+        )
+        workouts = (
+            session.query(Workout)
+            .filter_by(user_id=user.id)
+            .order_by(Workout.created_at.desc())
+            .limit(10)
+            .all()
+        )
+
+        regimen_plan = _safe_json_loads(regimen.plan_json) if regimen else None
+        days = []
+        if isinstance(regimen_plan, dict):
+            maybe_days = regimen_plan.get("days")
+            if isinstance(maybe_days, list):
+                for day in maybe_days:
+                    if not isinstance(day, dict):
+                        continue
+                    days.append(
+                        {
+                            "day_index": day.get("day_index"),
+                            "title": day.get("title"),
+                            "focus": day.get("focus"),
+                            "workout_id": day.get("workout_id"),
+                        }
+                    )
+
+        recent_workouts = []
+        for workout in workouts:
+            exercises = workout.exercises or []
+            recent_workouts.append(
+                {
+                    "id": workout.id,
+                    "date": workout.created_at.date().isoformat(),
+                    "mood": workout.mood,
+                    "muscles_worked": _parse_csv(workout.muscles_worked),
+                    "exercise_stats": [
+                        {
+                            "name": ex.name,
+                            "sets": ex.sets,
+                            "reps": ex.reps,
+                            "weight": ex.weight,
+                            "rest_time": ex.rest_time,
+                            "muscles_worked": _parse_csv(ex.muscles_worked),
+                        }
+                        for ex in exercises
+                    ],
+                }
+            )
+
+        training_days = [day for day in days if day.get("workout_id")]
+        adherence = {
+            "recent_workout_count": len(recent_workouts),
+            "planned_training_days": len(training_days),
+            "possible_missed_days": max(0, len(training_days) - len(recent_workouts)),
+            "streak_days": min(len(recent_workouts), 4),
+            "skipped_exercises_estimate": 0,
+        }
+
+        return {
+            "user_profile": {
+                "username": user.username,
+                "weight": user.current_weight,
+                "goal": regimen.description if regimen and regimen.description else "build strength and muscle",
+                "experience_level": "intermediate",
+            },
+            "constraints": {
+                "equipment": ["barbell", "dumbbells"],
+                "injuries": [],
+                "time_per_session_mins": 60,
+            },
+            "regimen": {
+                "name": regimen.name if regimen else None,
+                "theme": regimen.theme if regimen else None,
+                "weekly_schedule": days,
+                "target_muscle_groups": sorted(
+                    {
+                        muscle
+                        for workout in recent_workouts
+                        for muscle in workout.get("muscles_worked", [])
+                    }
+                ),
+            },
+            "latest_workouts": recent_workouts,
+            "adherence": adherence,
+        }
+
+
+def _build_citations(context: dict[str, Any]) -> list[str]:
+    citations: list[str] = []
+    regimen = context.get("regimen", {})
+    latest_workouts = context.get("latest_workouts", [])
+
+    if regimen.get("name"):
+        citations.append(f"Using regimen '{regimen['name']}'")
+    if regimen.get("theme"):
+        citations.append(f"Plan theme: {regimen['theme']}")
+    if latest_workouts:
+        first = latest_workouts[0]
+        muscles = ", ".join(first.get("muscles_worked", []))
+        citations.append(f"Most recent workout focus: {muscles or 'not specified'} on {first.get('date')}")
+    return citations
+
+
+def _category_for_question(question: str) -> str:
+    q = question.lower()
+    if any(word in q for word in ["injury", "pain", "hurt", "strain", "ache"]):
+        return "recovery"
+    if any(word in q for word in ["progress", "increase", "load", "weight", "rep", "set"]):
+        return "progression"
+    if any(word in q for word in ["swap", "replace", "dumbbell", "equipment", "travel"]):
+        return "exercise_swaps"
+    if any(word in q for word in ["form", "technique", "cue", "brace"]):
+        return "technique"
+    if any(word in q for word in ["overtrain", "balance", "missed", "schedule", "next workout"]):
+        return "program_balance"
+    if any(word in q for word in ["protein", "hydration", "nutrition", "carb"]):
+        return "nutrition"
+    return "general"
+
+
+def _suggest_questions_from_context(context: dict[str, Any]) -> list[str]:
+    latest_workouts = context.get("latest_workouts", [])
+    base = [
+        "Based on my last workout, what should I train next?",
+        "How much should I increase weight for compound lifts next week?",
+        "What rest times should I use for strength vs hypertrophy?",
+        "Can you swap today's workout for dumbbells only?",
+        "I only have 35 minutes today - how should I modify this session?",
+    ]
+    if latest_workouts:
+        muscles = latest_workouts[0].get("muscles_worked", [])
+        if "quads" in muscles or "hamstrings" in muscles:
+            base.insert(0, "How should I recover after my last leg day?")
+        if "chest" in muscles or "shoulders" in muscles:
+            base.insert(0, "How do I protect shoulders on pressing days?")
+    return base[:8]
+
+
+def _compose_answer(question: str, context: dict[str, Any], style: str) -> dict[str, Any]:
+    category = _category_for_question(question)
+    lower_q = question.lower()
+    safety_flags = []
+    if any(word in lower_q for word in ["injury", "pain", "hurt", "sharp"]):
+        safety_flags.append("possible_injury_language")
+
+    profile = context.get("user_profile", {})
+    weight = profile.get("weight")
+    latest_workouts = context.get("latest_workouts", [])
+
+    answer = "Prioritize consistent training quality this week."
+    why = [
+        "Consistency and progressive overload drive measurable gains.",
+        "Your current context suggests balancing hard sessions with recovery.",
+    ]
+    do_next = [
+        "Keep your next 2 sessions within RPE 7-8 on compounds.",
+        "Log all sets so progression decisions stay data-driven.",
+    ]
+
+    if category == "progression":
+        answer = "Increase load by 2.5-5 lb only after you hit all target reps with clean form."
+        why = [
+            "Small load jumps preserve technique while maintaining overload.",
+            "Using logged reps prevents chasing weight on low-readiness days.",
+        ]
+        do_next = [
+            "For each main lift, keep weight the same until all sets hit target reps.",
+            "If you clear all reps twice, add 2.5-5 lb next week.",
+            "If you miss reps twice, keep load and add one rep per set first.",
+        ]
+    elif category == "recovery":
+        answer = "Use a conservative recovery day and reduce peak effort until symptoms settle."
+        why = [
+            "Fatigue and discomfort improve with reduced intensity and better sleep/hydration.",
+            "Guardrails lower injury risk while you keep training momentum.",
+        ]
+        do_next = [
+            "Use 2-3 min rest for heavy work and 60-90s for accessories.",
+            "Sleep 7-9 hours and hydrate with 2-3L water today.",
+            "If pain is sharp or worsening, stop that lift and seek medical guidance.",
+        ]
+    elif category == "exercise_swaps":
+        answer = "Swap barbell compounds for dumbbell or machine variants while keeping movement intent."
+        why = [
+            "Pattern-matched substitutions preserve progression with available equipment.",
+            "Keeping volume similar avoids losing weekly stimulus.",
+        ]
+        do_next = [
+            "Replace barbell bench with dumbbell bench for same sets/reps.",
+            "Replace barbell row with chest-supported row.",
+            "Keep session time by capping accessories to 2 sets if needed.",
+        ]
+    elif category == "technique":
+        answer = "Prioritize controlled eccentric tempo and bracing cues before increasing intensity."
+        why = [
+            "Technique consistency improves force output and reduces breakdown.",
+            "Good reps create safer long-term progression.",
+        ]
+        do_next = [
+            "Use 2-3 sec eccentric on first two sets.",
+            "Film one top set and check bar path or joint position.",
+            "Stop sets 1-2 reps before form breakdown.",
+        ]
+    elif category == "program_balance":
+        answer = "Train the under-served pattern next and avoid stacking similar high-fatigue days."
+        why = [
+            "Balanced push/pull/lower distribution reduces overload spikes.",
+            "Even weekly muscle distribution supports recovery and adherence.",
+        ]
+        do_next = [
+            "If last workout was upper push, make next day pull or lower-body.",
+            "Keep total hard sets per muscle in the 10-16 weekly range.",
+            "Use one low-fatigue accessory day if you missed sessions.",
+        ]
+    elif category == "nutrition":
+        target_protein = None
+        if isinstance(weight, (float, int)):
+            target_protein = int(round(float(weight) * 0.8))
+        answer = "Center nutrition around protein and hydration near training."
+        why = [
+            "Protein supports muscle repair and adaptation from training stress.",
+            "Hydration quality correlates with performance and recovery.",
+        ]
+        do_next = [
+            f"Target roughly {target_protein}g protein/day." if target_protein else "Target 0.7-1.0g protein per lb bodyweight.",
+            "Drink 500-750ml water in the 2 hours before training.",
+            "Have a protein + carb meal within 2 hours post-workout.",
+        ]
+
+    if style == "concise":
+        do_next = do_next[:2]
+        why = why[:1]
+    elif style == "coach":
+        answer = f"Coach call: {answer}"
+
+    follow_ups = _suggest_questions_from_context(context)[:3]
+    citations = _build_citations(context)
+    return {
+        "category": category,
+        "direct_answer": answer,
+        "why": why,
+        "do_this_next": do_next,
+        "follow_ups": follow_ups,
+        "citations": citations,
+        "safety_flags": safety_flags,
+    }
+
+
+def _extract_json_object(raw_text: str) -> Optional[dict[str, Any]]:
+    text = raw_text.strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _compose_answer_with_claude(question: str, context: dict[str, Any], style: str) -> Optional[dict[str, Any]]:
+    api_key = os.getenv("CLAUDE_API_KEY")
+    if not api_key:
+        return None
+
+    model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+    system_prompt = (
+        "You are a fitness coaching assistant. Return ONLY a JSON object with keys: "
+        "direct_answer (string), why (array of 1-3 strings), do_this_next (array of 2-4 strings), "
+        "follow_ups (array of 3 strings), citations (array of 1-3 strings), safety_flags (array of strings), "
+        "category (one of progression,recovery,exercise_swaps,technique,program_balance,nutrition,general). "
+        "Keep advice practical, short, and grounded in provided context. "
+        "If injury/pain language appears, include safety flag 'possible_injury_language'."
+    )
+
+    user_prompt = (
+        f"Question: {question}\n"
+        f"Style: {style}\n"
+        f"Context JSON:\n{json.dumps(context, ensure_ascii=True)}"
+    )
+
+    payload = {
+        "model": model,
+        "max_tokens": 900,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            body_raw = response.read().decode("utf-8")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return None
+
+    try:
+        parsed = json.loads(body_raw)
+    except json.JSONDecodeError:
+        return None
+
+    content_chunks = parsed.get("content", [])
+    text_parts = []
+    if isinstance(content_chunks, list):
+        for chunk in content_chunks:
+            if isinstance(chunk, dict) and chunk.get("type") == "text":
+                text_value = chunk.get("text")
+                if isinstance(text_value, str):
+                    text_parts.append(text_value)
+
+    combined_text = "\n".join(text_parts).strip()
+    answer = _extract_json_object(combined_text)
+    if not answer:
+        return None
+
+    required_keys = ["direct_answer", "why", "do_this_next", "follow_ups", "citations", "safety_flags", "category"]
+    if any(key not in answer for key in required_keys):
+        return None
+    if not isinstance(answer.get("direct_answer"), str):
+        return None
+    if not isinstance(answer.get("why"), list):
+        return None
+    if not isinstance(answer.get("do_this_next"), list):
+        return None
+    if not isinstance(answer.get("follow_ups"), list):
+        return None
+    if not isinstance(answer.get("citations"), list):
+        return None
+    if not isinstance(answer.get("safety_flags"), list):
+        return None
+    if not isinstance(answer.get("category"), str):
+        return None
+
+    return {
+        "category": str(answer["category"]),
+        "direct_answer": str(answer["direct_answer"]),
+        "why": [str(item) for item in answer["why"]][:3],
+        "do_this_next": [str(item) for item in answer["do_this_next"]][:4],
+        "follow_ups": [str(item) for item in answer["follow_ups"]][:3],
+        "citations": [str(item) for item in answer["citations"]][:3],
+        "safety_flags": [str(item) for item in answer["safety_flags"]][:3],
+    }
+
+
+def _generate_research_answer(question: str, context: dict[str, Any], style: str) -> dict[str, Any]:
+    if not os.getenv("CLAUDE_API_KEY"):
+        raise RuntimeError("Claude API key is missing")
+
+    llm_answer = _compose_answer_with_claude(question, context, style)
+    if llm_answer is None:
+        raise RuntimeError("Claude request failed")
+    return llm_answer
 
 
 @app.get("/")
@@ -247,6 +647,96 @@ def create_regimen(username: str):
             "created_at": regimen.created_at.isoformat(),
             "updated_at": regimen.updated_at.isoformat(),
         }, 201
+
+
+@app.get("/users/<username>/research/context")
+def get_research_context(username: str):
+    context = _build_research_context(username)
+    if context is None:
+        return {"error": "user not found"}, 404
+    return context
+
+
+@app.get("/users/<username>/research/suggestions")
+def get_research_suggestions(username: str):
+    context = _build_research_context(username)
+    if context is None:
+        return {"error": "user not found"}, 404
+
+    return {
+        "suggested_questions": _suggest_questions_from_context(context),
+    }
+
+
+@app.post("/users/<username>/research/ask")
+def ask_research_question(username: str):
+    payload = flask.request.get_json(silent=True) or {}
+    question = payload.get("question")
+    style = payload.get("style", "concise")
+    if not isinstance(question, str) or not question.strip():
+        return {"error": "question is required"}, 400
+    if style not in ["concise", "detailed", "coach"]:
+        return {"error": "style must be one of concise|detailed|coach"}, 400
+
+    context = _build_research_context(username)
+    if context is None:
+        return {"error": "user not found"}, 404
+
+    try:
+        response = _generate_research_answer(question.strip(), context, style)
+    except RuntimeError:
+        return {"error": "Could not connect to AI provider. Please try again."}, 502
+
+    return {
+        "question": question.strip(),
+        "style": style,
+        **response,
+    }
+
+
+@app.post("/users/<username>/research/actions")
+def research_actions(username: str):
+    payload = flask.request.get_json(silent=True) or {}
+    action = payload.get("action")
+    answer_snapshot = payload.get("answer_snapshot")
+
+    if action not in ["apply_to_next_workout", "save_as_note", "regenerate"]:
+        return {"error": "action must be apply_to_next_workout|save_as_note|regenerate"}, 400
+
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return {"error": "user not found"}, 404
+
+        if action == "apply_to_next_workout":
+            note = "Applied research guidance to next workout plan."
+            user.log = f"{(user.log or '').strip()}\n{note}".strip()
+            session.commit()
+            return {"ok": True, "message": note}
+
+        if action == "save_as_note":
+            content = str(answer_snapshot or "Saved empty note")
+            user.log = f"{(user.log or '').strip()}\nResearch note: {content}".strip()
+            session.commit()
+            return {"ok": True, "message": "Saved research note to user log"}
+
+        if action == "regenerate":
+            question = payload.get("question")
+            style = payload.get("style", "concise")
+            if not isinstance(question, str) or not question.strip():
+                return {"error": "question is required for regenerate"}, 400
+            if style not in ["concise", "detailed", "coach"]:
+                return {"error": "style must be one of concise|detailed|coach"}, 400
+
+            context = _build_research_context(username)
+            if context is None:
+                return {"error": "user not found"}, 404
+            try:
+                response = _generate_research_answer(question.strip(), context, style)
+            except RuntimeError:
+                return {"error": "Could not connect to AI provider. Please try again."}, 502
+            response["direct_answer"] = f"{response['direct_answer']} (regenerated)"
+            return {"ok": True, "question": question.strip(), "style": style, **response}
 
 @app.patch("/users/<username>/regimens/<regimen_id>")
 def modify_regimen(username: str):
