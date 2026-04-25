@@ -207,7 +207,10 @@ def create_regimen(username: str):
     name = payload.get("name")
     description = payload.get("description")
     theme = payload.get("theme")
-    plan = payload.get("plan")
+    plan = None
+    # call Claude to generate the plan
+    if plan is None:
+        return {"error": "plan is required"}, 400
 
     if not isinstance(name, str) or not name.strip():
         return {"error": "name is required"}, 400
