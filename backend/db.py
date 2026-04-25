@@ -1,8 +1,8 @@
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String, create_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 
 def utcnow() -> datetime:
@@ -22,43 +22,48 @@ class User(Base):
     current_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     height: Mapped[float | None] = mapped_column(Float, nullable=True)
     estimated_bf: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    workouts: Mapped[list["Workout"]] = relationship("Workout", back_populates="user")
+    workouts: Mapped[list["Workout"]] = relationship("Workout", back_populates="user", cascade="all, delete-orphan")
+    regimens: Mapped[list["Regimen"]] = relationship("Regimen", back_populates="user", cascade="all, delete-orphan")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
+
 class Regimen(Base):
     __tablename__ = "Regimens"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user: Mapped["User"] = relationship("User", back_populates="regimens")
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    monday: Mapped[int] = mapped_column(Integer, nullable=False)
-    tuesday: Mapped[int] = mapped_column(Integer, nullable=False)
-    wednesday: Mapped[int] = mapped_column(Integer, nullable=False)
-    thursday: Mapped[int] = mapped_column(Integer, nullable=False)
-    friday: Mapped[int] = mapped_column(Integer, nullable=False)
-    saturday: Mapped[int] = mapped_column(Integer, nullable=False)
-    sunday: Mapped[int] = mapped_column(Integer, nullable=False)
+    theme: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+
 
 class Workout(Base):
     __tablename__ = "Workouts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     user: Mapped["User"] = relationship("User", back_populates="workouts")
-    exercises: Mapped[list["Exercise"]] = relationship("Exercise", back_populates="workout")
+    exercises: Mapped[list["Exercise"]] = relationship(
+        "Exercise", back_populates="workout", cascade="all, delete-orphan"
+    )
     mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
     muscles_worked: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
+
 
 class Exercise(Base):
     __tablename__ = "Exercises"
