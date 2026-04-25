@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -356,7 +357,7 @@ def _compose_answer_with_claude(question: str, context: dict[str, Any], style: s
     if not api_key:
         return None
 
-    model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+    model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
     system_prompt = (
         "You are a fitness coaching assistant. Return ONLY a JSON object with keys: "
         "direct_answer (string), why (array of 1-3 strings), do_this_next (array of 2-4 strings), "
@@ -950,11 +951,6 @@ def research_actions(username: str):
                 return {"error": "Could not connect to AI provider. Please try again."}, 502
             response["direct_answer"] = f"{response['direct_answer']} (regenerated)"
             return {"ok": True, "question": question.strip(), "style": style, **response}
-
-@app.patch("/users/<username>/regimens/<regimen_id>")
-def modify_regimen(username: str):
-    # call Claude to modify the regimen
-    return {"ok": True}, 200
 
 if __name__ == "__main__":
     init_db()
