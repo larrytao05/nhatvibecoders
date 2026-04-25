@@ -672,7 +672,7 @@ def _exercise_templates_for_focus(focus: str) -> list[dict[str, Any]]:
 
 
 def _compose_answer_with_claude(question: str, context: dict[str, Any], style: str) -> Optional[dict[str, Any]]:
-    api_key = os.getenv("CLAUDE_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         return None
 
@@ -766,7 +766,7 @@ def _compose_answer_with_claude(question: str, context: dict[str, Any], style: s
 
 
 def _generate_research_answer(question: str, context: dict[str, Any], style: str) -> dict[str, Any]:
-    if not os.getenv("CLAUDE_API_KEY"):
+    if not os.getenv("ANTHROPIC_API_KEY"):
         raise RuntimeError("Claude API key is missing")
 
     llm_answer = _compose_answer_with_claude(question, context, style)

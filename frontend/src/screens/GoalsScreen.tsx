@@ -15,7 +15,6 @@ export function GoalsScreen({ navigation }: Props) {
     <ScrollView className="flex-1 bg-surface" contentContainerClassName="px-5 pb-8 pt-16">
       <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Objectives</Text>
       <Text className="mt-3 text-4xl font-black leading-tight text-ink">What should the plan optimize for?</Text>
-      <Text className="mt-3 text-base leading-6 text-muted">Select multiple goals so the HTP logic can trade off volume, intensity, and recovery.</Text>
 
       <View className="mt-8 flex-row flex-wrap gap-3">
         {goals.map((goal) => {

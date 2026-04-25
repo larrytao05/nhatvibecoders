@@ -10,9 +10,6 @@ export function ProgressScreen() {
     <ScrollView className="flex-1 bg-surface" contentContainerClassName="px-5 pb-10 pt-14">
       <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Progress</Text>
       <Text className="mt-2 text-4xl font-black text-ink">Health metrics and AI insights</Text>
-      <Text className="mt-3 text-base leading-6 text-muted">
-        Placeholder dashboard for future body metrics, lift logs, adherence, and model-generated recommendations.
-      </Text>
 
       <View className="mt-6 rounded-3xl bg-white p-5">
         <Text className="text-xs font-black uppercase tracking-[2px] text-muted">Profile Snapshot</Text>
