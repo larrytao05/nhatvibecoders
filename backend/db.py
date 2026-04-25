@@ -54,6 +54,7 @@ class Workout(Base):
     user: Mapped["User"] = relationship("User", back_populates="workouts")
     exercises: Mapped[list["Exercise"]] = relationship("Exercise", back_populates="workout")
     mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    muscles_worked: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -68,6 +69,7 @@ class Exercise(Base):
     reps: Mapped[int] = mapped_column(Integer, nullable=False)
     weight: Mapped[float] = mapped_column(Float, nullable=False)
     rest_time: Mapped[int] = mapped_column(Integer, nullable=False)
+    muscles_worked: Mapped[str] = mapped_column(String(255), nullable=False)
     workout_id: Mapped[int] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=False)
     workout: Mapped["Workout"] = relationship("Workout", back_populates="exercises")
 
