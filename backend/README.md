@@ -56,3 +56,5 @@ See `DATABASE_SPEC.md`.
 - `POST /users` body: `{ "username": "larry", "current_weight": 180.5 }`
 - `GET /users/<username>`
 - `PATCH /users/<username>` body: `{ "current_weight": 179.2 }`
+
+Full API spec: `API_SPEC.md`.

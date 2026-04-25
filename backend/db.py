@@ -22,6 +22,7 @@ class User(Base):
     current_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     height: Mapped[float | None] = mapped_column(Float, nullable=True)
     estimated_bf: Mapped[float | None] = mapped_column(Float, nullable=True)
+    log: Mapped[str | None] = mapped_column(Text, nullable=True)
     workouts: Mapped[list["Workout"]] = relationship("Workout", back_populates="user", cascade="all, delete-orphan")
     regimens: Mapped[list["Regimen"]] = relationship("Regimen", back_populates="user", cascade="all, delete-orphan")
     logs: Mapped[list["WorkoutLog"]] = relationship("WorkoutLog", back_populates="user", cascade="all, delete-orphan")
@@ -37,7 +38,7 @@ class Regimen(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     user: Mapped["User"] = relationship("User", back_populates="regimens")
-
+    goals: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     theme: Mapped[str | None] = mapped_column(String(64), nullable=True)

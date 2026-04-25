@@ -60,6 +60,7 @@ def _serialize_regimen(r: Regimen) -> dict[str, Any]:
         "id": r.id,
         "user_id": r.user_id,
         "name": r.name,
+        "goals": r.goals,
         "description": r.description,
         "theme": r.theme,
         "plan": plan,
@@ -340,9 +341,13 @@ def create_regimen(username: str):
         except Exception as exc:
             return {"error": f"LLM call failed: {exc}"}, 502
 
+        raw_goals = onboarding.get("goals", "")
+        goals_str = ", ".join(raw_goals) if isinstance(raw_goals, list) else str(raw_goals)
+
         regimen = Regimen(
             user_id=user.id,
             name=name.strip(),
+            goals=goals_str,
             description=description if isinstance(description, str) else None,
             theme=theme if isinstance(theme, str) else None,
             plan_json=json.dumps(plan),

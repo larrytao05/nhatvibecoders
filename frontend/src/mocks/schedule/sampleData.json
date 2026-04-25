@@ -1,0 +1,24 @@
+{
+  "regimen": {
+    "id": 101,
+    "user_id": 1,
+    "name": "HTP Strength Recomposition",
+    "description": "Seven-day macro-plan generated from pasted history, goals, equipment, and recovery bandwidth.",
+    "theme": "strength_recomp",
+    "plan": {
+      "days": [
+        {
+          "id": "day-1",
+          "day_index": 1,
+          "title": "Upper Strength",
+          "focus": "Pressing strength, horizontal pull volume, shoulder stability",
+          "intensity": "High",
+          "workout_id": 201,
+          "notes": "Keep RPE around 8 on main compounds."
+        }
+      ]
+    },
+    "created_at": "2026-04-25T12:00:00Z",
+    "updated_at": "2026-04-25T12:00:00Z"
+  }
+}
