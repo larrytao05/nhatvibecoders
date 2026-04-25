@@ -22,7 +22,7 @@ from llm import (
     modify_regimen as llm_modify_regimen,
 )
 from llm.schemas import DayPlan, WeeklyPlan
-from llm.constants import DAYS_OF_WEEK
+from llm.constants import DAYS_OF_WEEK, get_exercise_muscles
 
 
 load_dotenv()
@@ -38,6 +38,102 @@ def _as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _dedupe_muscles(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        cleaned = value.strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cleaned)
+    return deduped
+
+
+def _normalize_exercise_muscles(value: Any, exercise_name: str | None = None) -> list[str]:
+    if isinstance(value, str):
+        muscles = value.split(",")
+    else:
+        muscles = [str(item) for item in _as_list(value)]
+
+    normalized = _dedupe_muscles([muscle.strip() for muscle in muscles if muscle.strip()])
+    if normalized:
+        return normalized
+    if exercise_name:
+        return get_exercise_muscles(exercise_name)
+    return []
+
+
+def _aggregate_workout_muscles(exercises: list[dict[str, Any]]) -> list[str]:
+    return _dedupe_muscles(
+        [
+            muscle
+            for exercise in exercises
+            for muscle in _normalize_exercise_muscles(exercise.get("muscles_worked"))
+        ]
+    )
+
+
+def _normalize_regimen_plan(plan: Any) -> dict[str, Any]:
+    if hasattr(plan, "model_dump"):
+        plan = plan.model_dump()
+    if not isinstance(plan, dict):
+        raise ValueError("regimen plan must be an object")
+
+    schedule = plan.get("schedule", [])
+    if hasattr(schedule, "model_dump"):
+        schedule = schedule.model_dump()
+    if not isinstance(schedule, list):
+        raise ValueError("regimen plan schedule must be a list")
+
+    normalized_schedule = []
+    for day in schedule:
+        if hasattr(day, "model_dump"):
+            day = day.model_dump()
+        if not isinstance(day, dict):
+            raise ValueError("regimen plan schedule entries must be objects")
+        normalized_schedule.append(
+            {
+                "day": str(day.get("day", "")).strip(),
+                "muscle_groups": [str(item).strip() for item in _as_list(day.get("muscle_groups")) if str(item).strip()],
+                "reasoning": str(day.get("reasoning", "")),
+            }
+        )
+
+    workouts = plan.get("workouts", {})
+    if hasattr(workouts, "model_dump"):
+        workouts = workouts.model_dump()
+    if not isinstance(workouts, dict):
+        raise ValueError("regimen plan workouts must be an object")
+
+    normalized_workouts: dict[str, list[dict[str, Any]]] = {}
+    for day, exercises in workouts.items():
+        normalized_exercises = []
+        for exercise in _as_list(exercises):
+            if hasattr(exercise, "model_dump"):
+                exercise = exercise.model_dump()
+            if not isinstance(exercise, dict):
+                raise ValueError("regimen plan workout exercises must be objects")
+            normalized_exercise = dict(exercise)
+            exercise_name = normalized_exercise.get("name")
+            normalized_exercise["muscles_worked"] = _normalize_exercise_muscles(
+                normalized_exercise.get("muscles_worked"),
+                exercise_name if isinstance(exercise_name, str) else None,
+            )
+            normalized_exercises.append(normalized_exercise)
+        normalized_workouts[str(day)] = normalized_exercises
+
+    return {
+        **plan,
+        "onboarding": plan.get("onboarding", {}),
+        "schedule": normalized_schedule,
+        "workouts": normalized_workouts,
+    }
 
 
 def _serialize_exercise(ex: Exercise) -> dict[str, Any]:
@@ -655,6 +751,19 @@ def _serialize_regimen(r: Regimen) -> dict[str, Any]:
     }
 
 
+def _serialize_user(user: User) -> dict[str, Any]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "current_weight": user.current_weight,
+        "height": user.height,
+        "estimated_bf": user.estimated_bf,
+        "created_at": user.created_at.isoformat(),
+        "updated_at": user.updated_at.isoformat(),
+    }
+
+
 def _serialize_log(log: WorkoutLog) -> dict[str, Any]:
     modifications = json.loads(log.modifications_json) if log.modifications_json else []
     return {
@@ -697,13 +806,7 @@ def create_user():
         session.add(user)
         session.commit()
 
-        return {
-            "id": user.id,
-            "username": user.username,
-            "current_weight": user.current_weight,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        }, 201
+        return _serialize_user(user), 201
 
 
 @app.get("/users/<username>")
@@ -713,13 +816,7 @@ def get_user(username: str):
         if user is None:
             return {"error": "not found"}, 404
 
-        return {
-            "id": user.id,
-            "username": user.username,
-            "current_weight": user.current_weight,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        }
+        return _serialize_user(user)
 
 
 @app.patch("/users/<username>")
@@ -733,16 +830,14 @@ def update_user(username: str):
 
         if "current_weight" in payload:
             user.current_weight = payload["current_weight"]
+        if "height" in payload:
+            user.height = payload["height"]
+        if "estimated_bf" in payload:
+            user.estimated_bf = payload["estimated_bf"]
 
         session.commit()
 
-        return {
-            "id": user.id,
-            "username": user.username,
-            "current_weight": user.current_weight,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        }
+        return _serialize_user(user)
 
 
 # ── Workouts ─────────────────────────────────────────────────────────────────

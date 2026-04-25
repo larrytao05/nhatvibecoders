@@ -211,13 +211,15 @@ export function WorkoutsScreen() {
         ) : null}
 
         {nextDay ? (
-          <DaySummaryCard
-            day={nextDay}
-            workout={nextDay.workout_id ? workouts.find((item) => item.id === nextDay.workout_id) ?? null : null}
-            expanding={expandingDayIds.includes(nextDay.id) || Boolean(nextDay.workout_id && !workouts.find((item) => item.id === nextDay.workout_id))}
-            eyebrow="Next day"
-            onPress={() => setSelectedDayId(nextDay.id)}
-          />
+          <View className="mt-6">
+            <DaySummaryCard
+              day={nextDay}
+              workout={nextDay.workout_id ? workouts.find((item) => item.id === nextDay.workout_id) ?? null : null}
+              expanding={expandingDayIds.includes(nextDay.id) || Boolean(nextDay.workout_id && !workouts.find((item) => item.id === nextDay.workout_id))}
+              eyebrow="Next day"
+              onPress={() => setSelectedDayId(nextDay.id)}
+            />
+          </View>
         ) : null}
 
         {regimen ? (

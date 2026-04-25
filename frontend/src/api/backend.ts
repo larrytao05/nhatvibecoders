@@ -217,7 +217,9 @@ function normalizeRegimen(response: BackendRegimenResponse, scheduledWorkoutResp
   const plannedWorkouts: Workout[] = [];
   const days: RegimenDay[] = (llmPlan.schedule ?? []).map((dayPlan, index) => {
     const exercises = llmPlan.workouts?.[dayPlan.day] ?? [];
-    const workoutId = exercises.length > 0 ? -(index + 1) : null;
+    const scheduledWorkout = scheduledWorkoutsByDay.get(dayPlan.day);
+    const hasTrainingFocus = dayPlan.muscle_groups.length > 0;
+    const workoutId = scheduledWorkout?.id ?? (hasTrainingFocus || exercises.length > 0 ? -(index + 1) : null);
     const normalizedExercises = exercises.map((exercise, exerciseIndex) => ({
       id: workoutId !== null ? workoutId * 100 - exerciseIndex : -(exerciseIndex + 1),
       workout_id: workoutId ?? -(index + 1),
@@ -313,6 +315,19 @@ export async function updateUserWeight(username: string, currentWeight: number, 
   const user = await requestJson<BackendUserResponse>(`/users/${encodeURIComponent(username)}`, {
     method: "PATCH",
     body: JSON.stringify({ current_weight: currentWeight }),
+  });
+
+  return normalizeUser(user, profile);
+}
+
+export async function updateUserProfile(username: string, profile: OnboardingProfile): Promise<BackendUser> {
+  const user = await requestJson<BackendUserResponse>(`/users/${encodeURIComponent(username)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      current_weight: Number(profile.current_weight),
+      height: Number(profile.height),
+      estimated_bf: Number(profile.estimated_bf),
+    }),
   });
 
   return normalizeUser(user, profile);
