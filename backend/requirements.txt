@@ -2,3 +2,6 @@ Flask
 SQLAlchemy
 psycopg2-binary
 python-dotenv
+anthropic
+pydantic
+jsonpatch

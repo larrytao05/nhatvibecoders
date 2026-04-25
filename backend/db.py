@@ -24,6 +24,7 @@ class User(Base):
     estimated_bf: Mapped[float | None] = mapped_column(Float, nullable=True)
     workouts: Mapped[list["Workout"]] = relationship("Workout", back_populates="user", cascade="all, delete-orphan")
     regimens: Mapped[list["Regimen"]] = relationship("Regimen", back_populates="user", cascade="all, delete-orphan")
+    logs: Mapped[list["WorkoutLog"]] = relationship("WorkoutLog", back_populates="user", cascade="all, delete-orphan")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -77,6 +78,26 @@ class Exercise(Base):
     muscles_worked: Mapped[str] = mapped_column(String(255), nullable=False)
     workout_id: Mapped[int] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=False)
     workout: Mapped["Workout"] = relationship("Workout", back_populates="exercises")
+
+class WorkoutLog(Base):
+    """Append-only log entry created after each completed workout.
+
+    observations   — LLM free-text summary of the session.
+    modifications_json — RFC 6902 patches relative to tomorrow's workout object.
+                         Stored as a JSON string; the user may accept or reject them.
+    """
+    __tablename__ = "WorkoutLogs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    regimen_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Regimens.id"), nullable=True, index=True)
+    workout_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=True)
+    user: Mapped["User"] = relationship("User", back_populates="logs")
+    day: Mapped[str] = mapped_column(String(16), nullable=False)   # e.g. "Monday"
+    observations: Mapped[str] = mapped_column(Text, nullable=False)
+    modifications_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
 
 def get_database_url() -> str:
     url = os.getenv("DATABASE_URL")
