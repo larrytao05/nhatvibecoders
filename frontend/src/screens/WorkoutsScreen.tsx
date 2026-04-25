@@ -123,10 +123,7 @@ export function WorkoutsScreen() {
     <View className="flex-1 bg-surface">
       <ScrollView ref={scrollViewRef} contentContainerClassName="px-5 pb-32 pt-14">
         <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Workouts</Text>
-        <Text className="mt-2 text-4xl font-black text-ink">Today and what&apos;s next</Text>
-        <Text className="mt-3 text-base leading-6 text-muted">
-          Today stays pinned to the top, followed by the next training days and planning metrics.
-        </Text>
+        <Text className="mt-2 text-4xl font-black text-ink">Today</Text>
 
         {!regimen ? (
           <View className="mt-6 rounded-3xl border border-blue-100 bg-white p-5">

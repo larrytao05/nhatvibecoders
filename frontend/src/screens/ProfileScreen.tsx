@@ -10,9 +10,6 @@ export function ProfileScreen() {
     <ScrollView className="flex-1 bg-surface" contentContainerClassName="px-5 pb-10 pt-14">
       <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Profile</Text>
       <Text className="mt-2 text-4xl font-black text-ink">My data</Text>
-      <Text className="mt-3 text-base leading-6 text-muted">
-        The user-owned inputs and profile data that should remain editable and auditable.
-      </Text>
 
       <View className="mt-6 rounded-3xl bg-ink p-5">
         <Text className="text-xs font-black uppercase tracking-[2px] text-blue-200">Backend User</Text>

@@ -16,10 +16,7 @@ export function HomeScreen() {
   return (
     <ScrollView className="flex-1 bg-surface" contentContainerClassName="px-5 pb-28 pt-14">
       <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Home</Text>
-      <Text className="mt-2 text-4xl font-black text-ink">Today at a glance</Text>
-      <Text className="mt-3 text-base leading-6 text-muted">
-        Your current plan, daily workout status, and reminders in one place.
-      </Text>
+      <Text className="mt-2 text-4xl font-black text-ink">Dashboard</Text>
 
       <HomeCard eyebrow="Summary" title={regimen?.name ?? "HTP Plan"}>
         <View className="mt-5 flex-row justify-between">

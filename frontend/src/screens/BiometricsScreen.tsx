@@ -13,11 +13,8 @@ export function BiometricsScreen({ navigation }: Props) {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-surface">
       <ScrollView contentContainerClassName="flex-grow px-5 pb-8 pt-16">
-        <Text className="text-sm font-black uppercase tracking-[3px] text-brand">HTP Setup</Text>
+        <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Workout Plan Setup</Text>
         <Text className="mt-3 text-4xl font-black leading-tight text-ink">Start with your current body metrics.</Text>
-        <Text className="mt-3 text-base leading-6 text-muted">
-          These mirror the backend `users` table so the real profile endpoint can drop in later.
-        </Text>
 
         <View className="mt-8">
           <MetricInput

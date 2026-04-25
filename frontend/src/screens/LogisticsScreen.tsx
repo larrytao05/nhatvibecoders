@@ -12,9 +12,7 @@ export function LogisticsScreen() {
       <ScrollView contentContainerClassName="px-5 pb-8 pt-16">
         <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Constraints</Text>
         <Text className="mt-3 text-4xl font-black leading-tight text-ink">Tell the AI what real life allows.</Text>
-        <Text className="mt-3 text-base leading-6 text-muted">
-          Pasting an existing routine triggers the simulated LLM call and hydrates the regimen JSON.
-        </Text>
+
 
         <View className="mt-8 rounded-3xl bg-white p-5">
           <View className="flex-row items-center justify-between">

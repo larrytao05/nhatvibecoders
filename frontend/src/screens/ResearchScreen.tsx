@@ -149,7 +149,7 @@ export function ResearchScreen() {
     <View className="flex-1 bg-surface">
       <ScrollView ref={mainScrollRef} className="flex-1" contentContainerClassName="px-5 pb-44 pt-14">
         <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Research</Text>
-        <Text className="mt-2 text-4xl font-black text-ink">Coach chat</Text>
+        <Text className="mt-2 text-4xl font-black text-ink">AI Trainer</Text>
         <Text className="mt-3 text-base leading-6 text-muted">
           Ask questions using your regimen, workouts, mood, rest, and weight context.
         </Text>

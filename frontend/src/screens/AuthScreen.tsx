@@ -41,10 +41,7 @@ export function AuthScreen() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-surface px-5 pt-16">
       <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Welcome</Text>
-      <Text className="mt-3 text-4xl font-black leading-tight text-ink">Start with your username.</Text>
-      <Text className="mt-3 text-base leading-6 text-muted">
-        No password yet. Login checks for an existing backend user; signup creates a new one.
-      </Text>
+      <Text className="mt-3 text-4xl font-black leading-tight text-ink">gAI.nz</Text>
 
       <View className="mt-8 flex-row rounded-2xl bg-slate-200 p-1">
         <AuthToggle label="Log in" selected={mode === "login"} onPress={() => setMode("login")} />
