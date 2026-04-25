@@ -13,6 +13,7 @@ import { GoalsScreen } from "./screens/GoalsScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { LogisticsScreen } from "./screens/LogisticsScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
+import { ResearchScreen } from "./screens/ResearchScreen";
 import { WorkoutsScreen } from "./screens/WorkoutsScreen";
 import { useWorkoutPlanner, WorkoutPlannerProvider } from "./state/WorkoutPlannerContext";
 
@@ -54,6 +55,11 @@ function MainNavigator() {
         name="Workouts"
         component={WorkoutsScreen}
         options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="WO" /> }}
+      />
+      <MainTabs.Screen
+        name="Research"
+        component={ResearchScreen}
+        options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="AI" /> }}
       />
       <MainTabs.Screen
         name="Profile"
