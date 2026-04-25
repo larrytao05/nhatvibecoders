@@ -32,8 +32,7 @@ sets/reps, and other granular details in a later step — this step exists to in
 - muscle_groups for each day must only contain values from this list:
   {", ".join(MUSCLE_GROUPS)}
 - Rest days have an empty muscle_groups list
-- Use the reasoning field to capture decisions (e.g. why this split, recovery considerations) \
-that should inform the exercise-selection step
+- reasoning: one short sentence only — the key split decision for exercise-selection context
 </constraints>"""
     return _ROLE, user
 
@@ -74,8 +73,9 @@ Planning notes: {day_plan.reasoning}
 
 <constraints>
 - Only select exercises from the available_exercises list above; do not invent new names
+- muscles_worked is derived automatically from the selected exercise names
 - Specify realistic values: sets, reps, weight in lbs, rest_time in seconds
-- Use the notes field for brief form cues or exercise-specific guidance
+- notes: 3–5 words max, one key form cue only, or empty string if none needed
 - Choose exercise count and volume appropriate for the user's commitment and goals
 </constraints>"""
     return _ROLE, user
@@ -173,6 +173,8 @@ modifications to tomorrow's workout as RFC 6902 JSON Patch operations.
   Example: "Bench 5x6@195 complete, +10lb vs last. HRV 62 nominal, sleep 7.5h, no fatigue flags."
 - modifications: RFC 6902 patches relative to the tomorrow_workout object \
   (e.g. "/exercises/0/sets"); empty list if no changes are needed
+- If clear recovery or pain signals mean tomorrow should be rest, replace "/exercises" with []
+- If tomorrow has no exercises but the user should train, replace "/exercises" with a complete exercise list
 - Only suggest modifications for clear recovery or performance reasons
 </constraints>"""
     return _ROLE, user

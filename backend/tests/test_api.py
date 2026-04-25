@@ -101,10 +101,39 @@ def test_log_workout_success(client):
     assert data["exercises"][0]["sets"] == 4
 
 
+def test_log_workout_aggregates_workout_muscles_from_exercises(client):
+    _create_user(client, "eve_plus")
+    r = client.post("/users/eve_plus/workouts", json={
+        "mood": "good",
+        "muscles_worked": ["Upper Chest"],
+        "exercises": [
+            {
+                "name": "Barbell Bench Press",
+                "sets": 4,
+                "reps": 8,
+                "weight": 135,
+                "rest_time": 120,
+                "muscles_worked": ["Upper Chest", "Triceps"],
+            },
+            {
+                "name": "Face Pull",
+                "sets": 3,
+                "reps": 15,
+                "weight": 40,
+                "rest_time": 45,
+                "muscles_worked": ["Rear Delt", "Traps"],
+            },
+        ],
+    })
+    assert r.status_code == 201
+    assert r.get_json()["muscles_worked"] == "Upper Chest, Triceps, Rear Delt, Traps"
+
+
 def test_log_workout_missing_muscles(client):
     _create_user(client, "frank")
     r = client.post("/users/frank/workouts", json={"exercises": SAMPLE_EXERCISES_PAYLOAD})
-    assert r.status_code == 400
+    assert r.status_code == 201
+    assert r.get_json()["muscles_worked"] == "chest, triceps"
 
 
 def test_log_workout_empty_exercises(client):
@@ -163,6 +192,7 @@ def test_create_regimen_success(client):
     assert data["plan"]["onboarding"] == SAMPLE_ONBOARDING
     assert len(data["plan"]["schedule"]) == 7
     assert "Monday" in data["plan"]["workouts"]
+    assert data["plan"]["workouts"]["Monday"][0]["muscles_worked"] == ["Upper Chest", "Front Delt", "Triceps"]
 
 
 def test_create_regimen_missing_name(client):
@@ -296,6 +326,161 @@ def test_complete_workout_creates_log(client):
     assert data["regimen_id"] == regimen_id
     assert data["workout_id"] == workout_id
     assert data["day"] == "Monday"
+    assert data["baseline_next_workout"]["scheduled_day"] == "Tuesday"
+    assert data["baseline_next_workout"]["exercises"][0]["sets"] == 4
+    assert data["suggested_next_workout"]["scheduled_day"] == "Tuesday"
+    assert data["suggested_next_workout"]["exercises"][0]["sets"] == 3
+
+
+def test_accept_workout_suggestion_schedules_instance_without_mutating_regimen(client):
+    _create_user(client, "willa")
+    regimen_id = _create_regimen(client, "willa").get_json()["id"]
+    workout_id = _log_workout(client, "willa").get_json()["id"]
+
+    mock_entry = {
+        "observations": "Pressing fatigue noted.",
+        "modifications": [{"op": "replace", "path": "/exercises/0/sets", "value": 2}],
+    }
+    with patch("app.llm_complete_workout", new=AsyncMock(return_value=mock_entry)):
+        r = client.post(f"/users/willa/workouts/{workout_id}/complete", json={
+            "regimen_id": regimen_id,
+            "today_day": "Monday",
+        })
+
+    assert r.status_code == 201
+    log_id = r.get_json()["id"]
+
+    accept = client.post(f"/users/willa/logs/{log_id}/next-workout/accept")
+    assert accept.status_code == 201
+    next_workout = accept.get_json()["next_workout"]
+    assert next_workout["status"] == "scheduled"
+    assert next_workout["scheduled_day"] == "Tuesday"
+    assert next_workout["exercises"][0]["sets"] == 2
+
+    latest = client.get("/users/willa/regimens/latest").get_json()
+    assert latest["regimen"]["plan"]["workouts"]["Tuesday"][0]["sets"] == 4
+    assert latest["scheduled_workouts"][0]["id"] == next_workout["id"]
+
+
+def test_reject_workout_suggestion_schedules_blueprint_instance(client):
+    _create_user(client, "wilma")
+    regimen_id = _create_regimen(client, "wilma").get_json()["id"]
+    workout_id = _log_workout(client, "wilma").get_json()["id"]
+
+    mock_entry = {
+        "observations": "Pressing fatigue noted.",
+        "modifications": [{"op": "replace", "path": "/exercises/0/sets", "value": 2}],
+    }
+    with patch("app.llm_complete_workout", new=AsyncMock(return_value=mock_entry)):
+        r = client.post(f"/users/wilma/workouts/{workout_id}/complete", json={
+            "regimen_id": regimen_id,
+            "today_day": "Monday",
+        })
+
+    assert r.status_code == 201
+    log_id = r.get_json()["id"]
+
+    reject = client.post(f"/users/wilma/logs/{log_id}/next-workout/reject")
+    assert reject.status_code == 201
+    next_workout = reject.get_json()["next_workout"]
+    assert next_workout["scheduled_day"] == "Tuesday"
+    assert next_workout["exercises"][0]["sets"] == 4
+
+
+def test_accept_workout_suggestion_can_schedule_rest_instance(client):
+    _create_user(client, "winnie")
+    regimen_id = _create_regimen(client, "winnie").get_json()["id"]
+    workout_id = _log_workout(client, "winnie").get_json()["id"]
+
+    mock_entry = {
+        "observations": "Pain signal; make tomorrow recovery.",
+        "modifications": [{"op": "replace", "path": "/exercises", "value": []}],
+    }
+    with patch("app.llm_complete_workout", new=AsyncMock(return_value=mock_entry)):
+        r = client.post(f"/users/winnie/workouts/{workout_id}/complete", json={
+            "regimen_id": regimen_id,
+            "today_day": "Monday",
+        })
+
+    assert r.status_code == 201
+    payload = r.get_json()
+    assert payload["baseline_next_workout"]["exercises"]
+    assert payload["suggested_next_workout"]["scheduled_day"] == "Tuesday"
+    assert payload["suggested_next_workout"]["muscles_worked"] == "Recovery"
+    assert payload["suggested_next_workout"]["exercises"] == []
+
+    accept = client.post(f"/users/winnie/logs/{payload['id']}/next-workout/accept")
+    assert accept.status_code == 201
+    next_workout = accept.get_json()["next_workout"]
+    assert next_workout["status"] == "scheduled"
+    assert next_workout["scheduled_day"] == "Tuesday"
+    assert next_workout["muscles_worked"] == "Recovery"
+    assert next_workout["exercises"] == []
+
+
+def test_accept_workout_suggestion_treats_removed_exercises_as_rest(client):
+    _create_user(client, "wanda")
+    regimen_id = _create_regimen(client, "wanda").get_json()["id"]
+    workout_id = _log_workout(client, "wanda").get_json()["id"]
+
+    mock_entry = {
+        "observations": "Pain signal; remove tomorrow's work.",
+        "modifications": [{"op": "remove", "path": "/exercises"}],
+    }
+    with patch("app.llm_complete_workout", new=AsyncMock(return_value=mock_entry)):
+        r = client.post(f"/users/wanda/workouts/{workout_id}/complete", json={
+            "regimen_id": regimen_id,
+            "today_day": "Monday",
+        })
+
+    assert r.status_code == 201
+    payload = r.get_json()
+    assert payload["suggested_next_workout"]["muscles_worked"] == "Recovery"
+    assert payload["suggested_next_workout"]["exercises"] == []
+
+    accept = client.post(f"/users/wanda/logs/{payload['id']}/next-workout/accept")
+    assert accept.status_code == 201
+    assert accept.get_json()["next_workout"]["exercises"] == []
+
+
+def test_accept_workout_suggestion_can_turn_rest_day_into_workout(client):
+    _create_user(client, "wyatt")
+    regimen_id = _create_regimen(client, "wyatt").get_json()["id"]
+    workout_id = _log_workout(client, "wyatt").get_json()["id"]
+
+    added_exercises = [
+        {
+            "name": "Dumbbell Bench Press",
+            "sets": 3,
+            "reps": 10,
+            "weight": 50.0,
+            "rest_time": 90,
+            "muscles_worked": "chest, triceps",
+        }
+    ]
+    mock_entry = {
+        "observations": "Recovered well; add light work.",
+        "modifications": [{"op": "replace", "path": "/exercises", "value": added_exercises}],
+    }
+    with patch("app.llm_complete_workout", new=AsyncMock(return_value=mock_entry)):
+        r = client.post(f"/users/wyatt/workouts/{workout_id}/complete", json={
+            "regimen_id": regimen_id,
+            "today_day": "Tuesday",
+        })
+
+    assert r.status_code == 201
+    payload = r.get_json()
+    assert payload["baseline_next_workout"]["scheduled_day"] == "Wednesday"
+    assert payload["baseline_next_workout"]["exercises"] == []
+    assert payload["suggested_next_workout"]["muscles_worked"] == "chest, triceps"
+    assert payload["suggested_next_workout"]["exercises"][0]["name"] == "Dumbbell Bench Press"
+
+    accept = client.post(f"/users/wyatt/logs/{payload['id']}/next-workout/accept")
+    assert accept.status_code == 201
+    next_workout = accept.get_json()["next_workout"]
+    assert next_workout["scheduled_day"] == "Wednesday"
+    assert next_workout["muscles_worked"] == "chest, triceps"
+    assert next_workout["exercises"][0]["sets"] == 3
 
 
 def test_complete_workout_missing_regimen_id(client):

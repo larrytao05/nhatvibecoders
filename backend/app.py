@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 from datetime import date as date_type
@@ -16,8 +17,12 @@ from db import Exercise, Regimen, User, Workout, WorkoutLog, get_session, init_d
 from llm import (
     complete_workout as llm_complete_workout,
     create_regimen as llm_create_regimen,
+    expand_day as llm_expand_day,
+    generate_weekly_plan as llm_generate_weekly_plan,
     modify_regimen as llm_modify_regimen,
 )
+from llm.schemas import DayPlan, WeeklyPlan
+from llm.constants import DAYS_OF_WEEK
 
 
 load_dotenv()
@@ -51,8 +56,12 @@ def _serialize_workout(w: Workout) -> dict[str, Any]:
     return {
         "id": w.id,
         "user_id": w.user_id,
+        "regimen_id": w.regimen_id,
+        "source_log_id": w.source_log_id,
         "mood": w.mood,
         "muscles_worked": w.muscles_worked,
+        "scheduled_day": w.scheduled_day,
+        "status": w.status,
         "exercises": [_serialize_exercise(e) for e in (w.exercises or [])],
         "created_at": w.created_at.isoformat(),
         "updated_at": w.updated_at.isoformat(),
@@ -72,6 +81,131 @@ def _parse_csv(value: Optional[str]) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _next_day_name(today_day: str) -> str:
+    return DAYS_OF_WEEK[(DAYS_OF_WEEK.index(today_day) + 1) % 7]
+
+
+def _find_schedule_day(plan: dict[str, Any], day_name: str) -> dict[str, Any]:
+    schedule = plan.get("schedule")
+    if not isinstance(schedule, list):
+        return {}
+    return next((day for day in schedule if isinstance(day, dict) and day.get("day") == day_name), {})
+
+
+def _exercise_muscles(exercise_payload: dict[str, Any], fallback_muscles: list[str]) -> str:
+    explicit = exercise_payload.get("muscles_worked")
+    if isinstance(explicit, list):
+        muscles = [str(item).strip() for item in explicit if str(item).strip()]
+    elif isinstance(explicit, str):
+        muscles = _parse_csv(explicit)
+    else:
+        muscles = fallback_muscles
+    return ", ".join(muscles or fallback_muscles or ["general"])
+
+
+def _workout_muscles(muscle_groups: list[str], exercises: list[dict[str, Any]]) -> str:
+    if not exercises:
+        return "Recovery"
+    if muscle_groups:
+        return ", ".join(muscle_groups)
+
+    exercise_muscles = sorted(
+        {
+            muscle
+            for exercise in exercises
+            for muscle in _parse_csv(str(exercise.get("muscles_worked", "")))
+            if muscle
+        }
+    )
+    return ", ".join(exercise_muscles or ["general"])
+
+
+def _build_next_workout_payload(
+    plan: dict[str, Any],
+    today_day: str,
+    modifications: list[dict[str, Any]],
+) -> dict[str, Any]:
+    tomorrow_day = _next_day_name(today_day)
+    schedule_day = _find_schedule_day(plan, tomorrow_day)
+    muscle_groups = [str(item).strip() for item in _as_list(schedule_day.get("muscle_groups")) if str(item).strip()]
+    base_exercises = copy.deepcopy(plan.get("workouts", {}).get(tomorrow_day, []))
+    tomorrow_workout = {"day": tomorrow_day, "exercises": base_exercises}
+
+    patched_workout = jsonpatch.apply_patch(tomorrow_workout, modifications, in_place=False)
+    if not isinstance(patched_workout, dict):
+        raise ValueError("tomorrow_workout must be an object")
+
+    patched_exercises = patched_workout.get("exercises", [])
+    if patched_exercises is None:
+        patched_exercises = []
+    if isinstance(patched_exercises, str) and patched_exercises.strip().lower() in {"", "rest", "recovery"}:
+        patched_exercises = []
+    if not isinstance(patched_exercises, list):
+        raise ValueError("tomorrow_workout.exercises must be a list")
+
+    normalized_exercises = []
+    for idx, exercise_payload in enumerate(patched_exercises):
+        if not isinstance(exercise_payload, dict):
+            raise ValueError(f"tomorrow_workout.exercises[{idx}] must be an object")
+        normalized_exercises.append(
+            {
+                "name": str(exercise_payload["name"]).strip(),
+                "sets": int(exercise_payload["sets"]),
+                "reps": int(exercise_payload["reps"]),
+                "weight": float(exercise_payload["weight"]),
+                "rest_time": int(exercise_payload["rest_time"]),
+                "muscles_worked": _exercise_muscles(exercise_payload, muscle_groups),
+            }
+        )
+
+    return {
+        "scheduled_day": tomorrow_day,
+        "status": "scheduled",
+        "muscles_worked": _workout_muscles(muscle_groups, normalized_exercises),
+        "exercises": normalized_exercises,
+    }
+
+
+def _workout_instance_from_payload(
+    user_id: int,
+    regimen_id: int,
+    payload: dict[str, Any],
+) -> Workout:
+    workout = Workout(
+        user_id=user_id,
+        regimen_id=regimen_id,
+        mood="scheduled",
+        muscles_worked=payload["muscles_worked"],
+        scheduled_day=payload["scheduled_day"],
+        status="scheduled",
+    )
+
+    for exercise_payload in payload["exercises"]:
+        workout.exercises.append(
+            Exercise(
+                name=exercise_payload["name"],
+                sets=exercise_payload["sets"],
+                reps=exercise_payload["reps"],
+                weight=exercise_payload["weight"],
+                rest_time=exercise_payload["rest_time"],
+                muscles_worked=exercise_payload["muscles_worked"],
+            )
+        )
+
+    return workout
+
+
+def _build_scheduled_workout_instance(
+    user_id: int,
+    regimen_id: int,
+    plan: dict[str, Any],
+    today_day: str,
+    modifications: list[dict[str, Any]],
+) -> Workout | None:
+    payload = _build_next_workout_payload(plan, today_day, modifications)
+    return _workout_instance_from_payload(user_id, regimen_id, payload)
 
 
 def _build_research_context(username: str) -> Optional[dict[str, Any]]:
@@ -215,10 +349,14 @@ def _suggest_questions_from_context(context: dict[str, Any]) -> list[str]:
         "I only have 35 minutes today - how should I modify this session?",
     ]
     if latest_workouts:
-        muscles = latest_workouts[0].get("muscles_worked", [])
+        muscles = {
+            muscle.casefold()
+            for muscle in latest_workouts[0].get("muscles_worked", [])
+            if isinstance(muscle, str)
+        }
         if "quads" in muscles or "hamstrings" in muscles:
             base.insert(0, "How should I recover after my last leg day?")
-        if "chest" in muscles or "shoulders" in muscles:
+        if {"upper chest", "lower chest", "front delt", "side delt", "rear delt"} & muscles:
             base.insert(0, "How do I protect shoulders on pressing days?")
     return base[:8]
 
@@ -541,7 +679,7 @@ def _generate_research_answer(question: str, context: dict[str, Any], style: str
     return llm_answer
 
 def _serialize_regimen(r: Regimen) -> dict[str, Any]:
-    plan = json.loads(r.plan_json) if r.plan_json else None
+    plan = _normalize_regimen_plan(json.loads(r.plan_json)) if r.plan_json else None
     return {
         "id": r.id,
         "user_id": r.user_id,
@@ -562,6 +700,7 @@ def _serialize_log(log: WorkoutLog) -> dict[str, Any]:
         "user_id": log.user_id,
         "regimen_id": log.regimen_id,
         "workout_id": log.workout_id,
+        "next_workout_id": log.next_workout_id,
         "log_date": log.log_date.isoformat() if log.log_date else None,
         "day": log.day,
         "observations": log.observations,
@@ -653,9 +792,7 @@ def log_workout(username: str):
     muscles_worked = payload.get("muscles_worked")
     exercises_payload = payload.get("exercises")
 
-    muscles_list = [str(x).strip() for x in _as_list(muscles_worked) if str(x).strip()]
-    if not muscles_list:
-        return {"error": "muscles_worked is required (string or list)"}, 400
+    muscles_list = _dedupe_muscles([str(x).strip() for x in _as_list(muscles_worked) if str(x).strip()])
 
     if not isinstance(exercises_payload, list) or len(exercises_payload) == 0:
         return {"error": "exercises must be a non-empty list"}, 400
@@ -665,7 +802,7 @@ def log_workout(username: str):
         if user is None:
             return {"error": "user not found"}, 404
 
-        workout = Workout(user_id=user.id, mood=mood, muscles_worked=", ".join(muscles_list))
+        normalized_exercises: list[dict[str, Any]] = []
 
         for idx, ex in enumerate(exercises_payload):
             if not isinstance(ex, dict):
@@ -676,7 +813,7 @@ def log_workout(username: str):
             weight = ex.get("weight")
             rest_time = ex.get("rest_time")
             ex_muscles = ex.get("muscles_worked", muscles_worked)
-            ex_muscles_list = [str(x).strip() for x in _as_list(ex_muscles) if str(x).strip()]
+            ex_muscles_list = _normalize_exercise_muscles(ex_muscles, name if isinstance(name, str) else None)
 
             if not isinstance(name, str) or not name.strip():
                 return {"error": f"exercises[{idx}].name is required"}, 400
@@ -691,14 +828,31 @@ def log_workout(username: str):
             if not ex_muscles_list:
                 return {"error": f"exercises[{idx}].muscles_worked is required"}, 400
 
+            normalized_exercises.append(
+                {
+                    "name": name.strip(),
+                    "sets": sets,
+                    "reps": reps,
+                    "weight": float(weight),
+                    "rest_time": rest_time,
+                    "muscles_worked": ex_muscles_list,
+                }
+            )
+
+        workout_muscles = _aggregate_workout_muscles(normalized_exercises) or muscles_list
+        if not workout_muscles:
+            return {"error": "muscles_worked is required (string or list)"}, 400
+
+        workout = Workout(user_id=user.id, mood=mood, muscles_worked=", ".join(workout_muscles))
+        for exercise in normalized_exercises:
             workout.exercises.append(
                 Exercise(
-                    name=name.strip(),
-                    sets=sets,
-                    reps=reps,
-                    weight=float(weight),
-                    rest_time=rest_time,
-                    muscles_worked=", ".join(ex_muscles_list),
+                    name=exercise["name"],
+                    sets=exercise["sets"],
+                    reps=exercise["reps"],
+                    weight=exercise["weight"],
+                    rest_time=exercise["rest_time"],
+                    muscles_worked=", ".join(exercise["muscles_worked"]),
                 )
             )
 
@@ -738,9 +892,9 @@ def complete_workout(username: str, workout_id: int):
       today_day     str       — e.g. "Monday"
       health_metrics dict     — optional biometric signals (HR, sleep, etc.)
 
-    Returns the created WorkoutLog (observations + modification suggestions).
-    Modifications are NOT auto-applied; the client applies them via
-    POST /users/<username>/regimens/<id>/apply-patches if accepted.
+    Returns the created WorkoutLog plus a next-workout preview. The preview is
+    not scheduled until the client accepts or rejects it; the regimen remains
+    the long-term blueprint.
     """
     payload = flask.request.get_json(silent=True) or {}
     regimen_id = payload.get("regimen_id")
@@ -793,6 +947,13 @@ def complete_workout(username: str, workout_id: int):
         except Exception as exc:
             return {"error": f"LLM call failed: {exc}"}, 502
 
+        modifications = log_entry["modifications"]
+        try:
+            baseline_next_workout = _build_next_workout_payload(plan, today_day.strip(), [])
+            suggested_next_workout = _build_next_workout_payload(plan, today_day.strip(), modifications)
+        except (KeyError, TypeError, ValueError, jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
+            return {"error": f"next workout generation failed: {exc}", "modifications": modifications}, 422
+
         log = WorkoutLog(
             user_id=user.id,
             regimen_id=regimen_id,
@@ -800,15 +961,104 @@ def complete_workout(username: str, workout_id: int):
             log_date=date_type.today(),
             day=today_day.strip(),
             observations=log_entry["observations"],
-            modifications_json=json.dumps(log_entry["modifications"]),
+            modifications_json=json.dumps(modifications),
         )
         session.add(log)
         session.commit()
 
-        return _serialize_log(log), 201
+        response_payload = _serialize_log(log)
+        response_payload["baseline_next_workout"] = baseline_next_workout
+        response_payload["suggested_next_workout"] = suggested_next_workout
+        print(
+            f"[LLM] complete_workout response for username={username!r}; workout_id={workout_id}; regimen_id={regimen_id}:\n"
+            f"{json.dumps(response_payload, indent=2)}",
+            flush=True,
+        )
+        return response_payload, 201
+
+
+@app.post("/users/<username>/logs/<int:log_id>/next-workout/<decision>")
+def decide_next_workout(username: str, log_id: int, decision: str):
+    """
+    Create the next scheduled workout instance after the user reviews LLM
+    suggestions. Accept uses the suggested patches; reject uses the regimen
+    blueprint unchanged.
+    """
+    if decision not in {"accept", "reject"}:
+        return {"error": "decision must be accept or reject"}, 400
+
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return {"error": "user not found"}, 404
+
+        log = session.query(WorkoutLog).filter_by(id=log_id, user_id=user.id).first()
+        if log is None:
+            return {"error": "log not found"}, 404
+        if log.regimen_id is None:
+            return {"error": "log has no regimen"}, 400
+        if log.next_workout_id is not None:
+            existing = session.query(Workout).filter_by(id=log.next_workout_id, user_id=user.id).first()
+            if existing is not None:
+                _ = existing.exercises
+                return {"next_workout": _serialize_workout(existing), "decision": decision}, 200
+
+        regimen = session.query(Regimen).filter_by(id=log.regimen_id, user_id=user.id).first()
+        if regimen is None:
+            return {"error": "regimen not found"}, 404
+        if not regimen.plan_json:
+            return {"error": "regimen has no plan"}, 400
+
+        plan = json.loads(regimen.plan_json)
+        modifications = json.loads(log.modifications_json) if log.modifications_json else []
+        patches = modifications if decision == "accept" else []
+
+        try:
+            next_workout = _build_scheduled_workout_instance(user.id, regimen.id, plan, log.day, patches)
+        except (KeyError, TypeError, ValueError, jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
+            return {"error": f"next workout generation failed: {exc}", "modifications": patches}, 422
+        next_workout.source_log_id = log.id
+        session.add(next_workout)
+        session.flush()
+        log.next_workout_id = next_workout.id
+        session.commit()
+        _ = next_workout.exercises
+
+        return {"next_workout": _serialize_workout(next_workout), "decision": decision}, 201
 
 
 # ── Regimens ─────────────────────────────────────────────────────────────────
+
+@app.get("/users/<username>/regimens/latest")
+def get_latest_regimen(username: str):
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return {"error": "user not found"}, 404
+
+        regimen = (
+            session.query(Regimen)
+            .filter_by(user_id=user.id)
+            .order_by(Regimen.created_at.desc())
+            .first()
+        )
+        scheduled_workouts: list[dict[str, Any]] = []
+        if regimen is not None:
+            workouts = (
+                session.query(Workout)
+                .filter_by(user_id=user.id, regimen_id=regimen.id, status="scheduled")
+                .order_by(Workout.created_at.desc())
+                .all()
+            )
+            for workout in workouts:
+                _ = workout.exercises
+            scheduled_workouts = [_serialize_workout(workout) for workout in workouts]
+
+        return {
+            "regimen": _serialize_regimen(regimen) if regimen else None,
+            "scheduled_workouts": scheduled_workouts,
+        }
+
 
 @app.post("/users/<username>/regimens")
 def create_regimen(username: str):
@@ -842,7 +1092,7 @@ def create_regimen(username: str):
             flush=True,
         )
         try:
-            plan = asyncio.run(llm_create_regimen(onboarding))
+            plan = _normalize_regimen_plan(asyncio.run(llm_create_regimen(onboarding)))
         except Exception as exc:
             print(f"[LLM TEST] create_regimen failed for username={username!r}: {exc}", flush=True)
             return {"error": f"LLM call failed: {exc}"}, 502
@@ -868,6 +1118,132 @@ def create_regimen(username: str):
         session.commit()
 
         return _serialize_regimen(regimen), 201
+
+
+@app.post("/users/<username>/regimens/skeleton")
+def create_regimen_skeleton(username: str):
+    """
+    Generate and persist only step 1 of the regimen pipeline.
+
+    The returned plan has a weekly schedule and an empty workouts map so the
+    client can render the regimen immediately while individual days expand.
+    """
+    payload = flask.request.get_json(silent=True) or {}
+    name = payload.get("name")
+    description = payload.get("description")
+    theme = payload.get("theme")
+    onboarding = payload.get("onboarding")
+
+    if not isinstance(name, str) or not name.strip():
+        return {"error": "name is required"}, 400
+    if not isinstance(onboarding, dict) or not onboarding:
+        return {"error": "onboarding (dict) is required"}, 400
+
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return {"error": "user not found"}, 404
+
+        print(
+            f"[LLM] create_regimen_skeleton started for username={username!r}",
+            flush=True,
+        )
+        try:
+            weekly_plan = asyncio.run(llm_generate_weekly_plan(onboarding))
+        except Exception as exc:
+            print(f"[LLM] create_regimen_skeleton failed for username={username!r}: {exc}", flush=True)
+            return {"error": f"LLM call failed: {exc}"}, 502
+        print(
+            f"[LLM] create_regimen_skeleton succeeded for username={username!r}; schedule_days={len(weekly_plan.schedule)}",
+            flush=True,
+        )
+
+        raw_goals = onboarding.get("goals", "")
+        goals_str = ", ".join(raw_goals) if isinstance(raw_goals, list) else str(raw_goals)
+        plan = {
+            "onboarding": onboarding,
+            "schedule": [day.model_dump() for day in weekly_plan.schedule],
+            "workouts": {},
+        }
+
+        regimen = Regimen(
+            user_id=user.id,
+            name=name.strip(),
+            goals=goals_str,
+            description=description if isinstance(description, str) else None,
+            theme=theme if isinstance(theme, str) else None,
+            plan_json=json.dumps(plan),
+        )
+        session.add(regimen)
+        session.commit()
+
+        return _serialize_regimen(regimen), 201
+
+
+@app.post("/users/<username>/regimens/<int:regimen_id>/expand-day")
+def expand_regimen_day(username: str, regimen_id: int):
+    """
+    Expand one skeleton day into a full exercise list and persist it.
+
+    Body:
+      day  str  — schedule day name, e.g. "Monday"
+    """
+    payload = flask.request.get_json(silent=True) or {}
+    day_name = payload.get("day")
+    if not isinstance(day_name, str) or not day_name.strip():
+        return {"error": "day is required"}, 400
+
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return {"error": "user not found"}, 404
+
+        regimen = session.query(Regimen).filter_by(id=regimen_id, user_id=user.id).first()
+        if regimen is None:
+            return {"error": "regimen not found"}, 404
+        if not regimen.plan_json:
+            return {"error": "regimen has no plan"}, 400
+
+        plan = json.loads(regimen.plan_json)
+        schedule = plan.get("schedule")
+        if not isinstance(schedule, list):
+            return {"error": "regimen has no schedule"}, 400
+
+        day_payload = next((day for day in schedule if isinstance(day, dict) and day.get("day") == day_name.strip()), None)
+        if day_payload is None:
+            return {"error": "day not found in regimen schedule"}, 404
+
+        muscle_groups = day_payload.get("muscle_groups")
+        if not isinstance(muscle_groups, list) or not muscle_groups:
+            plan.setdefault("workouts", {})[day_name.strip()] = []
+            regimen.plan_json = json.dumps(plan)
+            session.commit()
+            return _serialize_regimen(regimen), 200
+
+        print(
+            f"[LLM] expand_regimen_day started for username={username!r}; regimen_id={regimen_id}; day={day_name.strip()!r}",
+            flush=True,
+        )
+        try:
+            weekly_plan = WeeklyPlan(schedule=[DayPlan(**day) for day in schedule])
+            day_plan = DayPlan(**day_payload)
+            day_workout = asyncio.run(llm_expand_day(plan.get("onboarding", {}), weekly_plan, day_plan))
+        except Exception as exc:
+            print(
+                f"[LLM] expand_regimen_day failed for username={username!r}; day={day_name.strip()!r}: {exc}",
+                flush=True,
+            )
+            return {"error": f"LLM call failed: {exc}"}, 502
+        print(
+            f"[LLM] expand_regimen_day succeeded for username={username!r}; day={day_workout.day!r}; exercises={len(day_workout.exercises)}",
+            flush=True,
+        )
+
+        plan.setdefault("workouts", {})[day_workout.day] = [exercise.model_dump() for exercise in day_workout.exercises]
+        regimen.plan_json = json.dumps(plan)
+        session.commit()
+
+        return _serialize_regimen(regimen), 200
 
 
 @app.patch("/users/<username>/regimens/<int:regimen_id>")
@@ -898,23 +1274,47 @@ def modify_regimen(username: str, regimen_id: int):
         if not regimen.plan_json:
             return {"error": "regimen has no plan"}, 400
 
-        plan = json.loads(regimen.plan_json)
+        plan = _normalize_regimen_plan(json.loads(regimen.plan_json))
         onboarding = plan.get("onboarding", {})
 
+        print(
+            f"[LLM] modify_regimen started for username={username!r}; regimen_id={regimen_id}; feedback={feedback.strip()!r}",
+            flush=True,
+        )
         try:
             result = asyncio.run(llm_modify_regimen(onboarding, plan, feedback.strip()))
         except Exception as exc:
+            print(
+                f"[LLM] modify_regimen failed for username={username!r}; regimen_id={regimen_id}: {exc}",
+                flush=True,
+            )
             return {"error": f"LLM call failed: {exc}"}, 502
 
         try:
-            updated_plan = jsonpatch.apply_patch(plan, result["patches"])
+            updated_plan = _normalize_regimen_plan(jsonpatch.apply_patch(plan, result["patches"]))
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
+            print(
+                f"[LLM] modify_regimen patch failed for username={username!r}; regimen_id={regimen_id}; patches={result['patches']}: {exc}",
+                flush=True,
+            )
             return {"error": f"patch application failed: {exc}", "patches": result["patches"]}, 422
 
         regimen.plan_json = json.dumps(updated_plan)
         session.commit()
 
-        return {**_serialize_regimen(regimen), "reasoning": result["reasoning"]}
+        print(
+            f"[LLM] modify_regimen succeeded for username={username!r}; regimen_id={regimen_id}; patches={len(result['patches'])}",
+            flush=True,
+        )
+
+        response_payload = {**_serialize_regimen(regimen), "reasoning": result["reasoning"]}
+        print(
+            f"[LLM] modify_regimen response for username={username!r}; regimen_id={regimen_id}:\n"
+            f"{json.dumps(response_payload, indent=2)}",
+            flush=True,
+        )
+
+        return response_payload
 
 
 @app.get("/users/<username>/regimens/latest")
@@ -961,10 +1361,10 @@ def apply_patches(username: str, regimen_id: int):
         if not regimen.plan_json:
             return {"error": "regimen has no plan"}, 400
 
-        plan = json.loads(regimen.plan_json)
+        plan = _normalize_regimen_plan(json.loads(regimen.plan_json))
 
         try:
-            updated_plan = jsonpatch.apply_patch(plan, patches)
+            updated_plan = _normalize_regimen_plan(jsonpatch.apply_patch(plan, patches))
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
             return {"error": f"patch application failed: {exc}"}, 422
 

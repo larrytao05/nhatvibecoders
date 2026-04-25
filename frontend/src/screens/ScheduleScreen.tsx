@@ -1,16 +1,22 @@
 import React, { useState } from "react";
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useWorkoutPlanner } from "../state/WorkoutPlannerContext";
 
 export function ScheduleScreen() {
-  const { regimen, workouts, selectedDayId, setSelectedDayId, tweakPlanWithFeedback } = useWorkoutPlanner();
+  const { regimen, workouts, selectedDayId, setSelectedDayId, tweakPlanWithFeedback, expandingDayIds } = useWorkoutPlanner();
   const [expandedDayId, setExpandedDayId] = useState(selectedDayId);
   const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedback, setFeedback] = useState("My shoulders are irritated. Reduce pressing fatigue and add more recovery.");
 
   const submitFeedback = async () => {
-    setFeedbackVisible(false);
-    await tweakPlanWithFeedback(feedback);
+    setFeedbackLoading(true);
+    try {
+      await tweakPlanWithFeedback(feedback);
+      setFeedbackVisible(false);
+    } finally {
+      setFeedbackLoading(false);
+    }
   };
 
   return (
@@ -25,6 +31,7 @@ export function ScheduleScreen() {
             const expanded = expandedDayId === day.id;
             const workout = day.workout_id ? workouts.find((item) => item.id === day.workout_id) : null;
             const active = selectedDayId === day.id;
+            const expanding = expandingDayIds.includes(day.id) || Boolean(day.workout_id && !workout);
 
             return (
               <Pressable
@@ -42,7 +49,7 @@ export function ScheduleScreen() {
                     <Text className="mt-2 text-sm leading-5 text-slate-600">{day.focus}</Text>
                   </View>
                   <View className="rounded-full bg-white px-3 py-2">
-                    <Text className="text-xs font-black text-brand">{day.intensity}</Text>
+                    <Text className="text-xs font-black text-brand">{expanding ? "Expanding" : day.intensity}</Text>
                   </View>
                 </View>
 
@@ -60,6 +67,10 @@ export function ScheduleScreen() {
                           </View>
                         ))}
                       </View>
+                    ) : expanding ? (
+                      <Text className="mt-2 text-sm font-semibold text-brand">
+                        Building this workout now. Exercises will appear here as soon as the LLM call returns.
+                      </Text>
                     ) : (
                       <Text className="mt-2 text-sm text-muted">{day.notes}</Text>
                     )}
@@ -78,28 +89,44 @@ export function ScheduleScreen() {
       </View>
 
       <Modal visible={feedbackVisible} animationType="slide" presentationStyle="pageSheet">
-        <View className="flex-1 bg-surface px-5 pb-8 pt-16">
-          <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Feedback Loop</Text>
-          <Text className="mt-3 text-3xl font-black text-ink">Send the full JSON plus your notes.</Text>
-          <View className="mt-6 rounded-3xl bg-white p-5">
-            <Text className="text-xs font-black uppercase tracking-[2px] text-muted">Current payload preview</Text>
-            <Text className="mt-3 text-sm leading-5 text-slate-600" numberOfLines={5}>
-              {JSON.stringify(regimen, null, 2)}
-            </Text>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} className="flex-1 bg-surface">
+          <View className="flex-1 px-5 pb-8 pt-16">
+            {feedbackLoading ? (
+              <View className="flex-1 items-center justify-center">
+                <View className="w-full rounded-3xl bg-white p-6">
+                  <ActivityIndicator color="#2563eb" size="large" />
+                  <Text className="mt-4 text-center text-2xl font-black text-ink">Modifying regimen...</Text>
+                  <Text className="mt-2 text-center text-sm leading-5 text-muted">
+                    Applying your feedback to the durable training blueprint. This can take a moment.
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <>
+                <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Feedback Loop</Text>
+                <Text className="mt-3 text-3xl font-black text-ink">Send the full JSON plus your notes.</Text>
+                <View className="mt-6 rounded-3xl bg-white p-5">
+                  <Text className="text-xs font-black uppercase tracking-[2px] text-muted">Current payload preview</Text>
+                  <Text className="mt-3 text-sm leading-5 text-slate-600" numberOfLines={5}>
+                    {JSON.stringify(regimen, null, 2)}
+                  </Text>
+                </View>
+                <TextInput
+                  multiline
+                  value={feedback}
+                  onChangeText={setFeedback}
+                  className="mt-5 min-h-36 rounded-3xl border border-slate-200 bg-white p-5 text-base leading-6 text-ink"
+                />
+                <Pressable onPress={submitFeedback} className="mt-auto rounded-2xl bg-brand px-5 py-4">
+                  <Text className="text-center text-lg font-black text-white">Simulate AI Replacement JSON</Text>
+                </Pressable>
+                <Pressable onPress={() => setFeedbackVisible(false)} className="mt-3 px-5 py-3">
+                  <Text className="text-center font-bold text-muted">Cancel</Text>
+                </Pressable>
+              </>
+            )}
           </View>
-          <TextInput
-            multiline
-            value={feedback}
-            onChangeText={setFeedback}
-            className="mt-5 min-h-36 rounded-3xl border border-slate-200 bg-white p-5 text-base leading-6 text-ink"
-          />
-          <Pressable onPress={submitFeedback} className="mt-auto rounded-2xl bg-brand px-5 py-4">
-            <Text className="text-center text-lg font-black text-white">Simulate AI Replacement JSON</Text>
-          </Pressable>
-          <Pressable onPress={() => setFeedbackVisible(false)} className="mt-3 px-5 py-3">
-            <Text className="text-center font-bold text-muted">Cancel</Text>
-          </Pressable>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

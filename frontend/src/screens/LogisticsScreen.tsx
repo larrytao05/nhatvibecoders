@@ -5,7 +5,7 @@ import { useWorkoutPlanner } from "../state/WorkoutPlannerContext";
 const equipmentOptions = ["Barbell", "Dumbbells", "Cables", "Machines", "Pull-up bar", "Bands"];
 
 export function LogisticsScreen() {
-  const { onboarding, setFrequency, toggleEquipment, setExistingPlan, generateRegimenFromText } = useWorkoutPlanner();
+  const { onboarding, setFrequency, toggleEquipment, setExistingPlan, generateRegimenFromText, generationError } = useWorkoutPlanner();
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 bg-surface">
@@ -67,6 +67,9 @@ export function LogisticsScreen() {
         <Pressable onPress={generateRegimenFromText} className="mt-6 rounded-2xl bg-ink px-5 py-4">
           <Text className="text-center text-lg font-black text-white">Generate HTP Regimen</Text>
         </Pressable>
+        {generationError ? (
+          <Text className="mt-3 text-center text-sm font-semibold leading-5 text-red-600">{generationError}</Text>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
