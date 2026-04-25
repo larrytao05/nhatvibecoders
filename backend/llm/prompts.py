@@ -125,13 +125,25 @@ def build_complete_workout_messages(
     health_metrics: dict,
     today_day: str,
     tomorrow_workout: dict,
+    past_logs: list[dict] = None,
 ) -> tuple[str, str]:
+    past_logs_block = ""
+    if past_logs:
+        past_logs_block = f"""
+<past_session_log>
+These are your own observations from previous sessions, recorded to track trends and inform \
+future modifications. Use them to identify progression, recurring fatigue patterns, or \
+performance signals relevant to tomorrow's workout.
+{_fmt(past_logs)}
+</past_session_log>
+"""
+
     user = f"""<task>
 You have been provided the user's basic biometric information, personal goals, time commitment, \
 and the workout regimen you co-curated. The user just completed today's ({today_day}) workout. \
-Review their performance and any available health metrics. Provide a brief observation about the \
-session, and if warranted, suggest temporary modifications to tomorrow's scheduled workout as \
-RFC 6902 JSON Patch operations. The user may reject your suggestions.
+Review their performance, available health metrics, and your past session notes. \
+Record a dense internal observation of today's session, then suggest any necessary \
+modifications to tomorrow's workout as RFC 6902 JSON Patch operations.
 </task>
 
 <input>
@@ -141,7 +153,7 @@ RFC 6902 JSON Patch operations. The user may reject your suggestions.
 <current_regimen>
 {_fmt(current_regimen)}
 </current_regimen>
-
+{past_logs_block}
 <completed_workout>
 {_fmt(completed_workout)}
 </completed_workout>
@@ -155,9 +167,12 @@ RFC 6902 JSON Patch operations. The user may reject your suggestions.
 </tomorrow_workout>
 
 <constraints>
-- observations: concise, actionable free-text summary of today's session
-- modifications: RFC 6902 patches relative to the tomorrow_workout object above \
+- observations: machine-readable internal log. Telegraph style, no prose, no user address. \
+  Format: comma-separated shorthand signals only. Max 2 sentences. \
+  Cover: actual vs planned sets/reps/weight, mood, HRV/HR/sleep flags, fatigue markers. \
+  Example: "Bench 5x6@195 complete, +10lb vs last. HRV 62 nominal, sleep 7.5h, no fatigue flags."
+- modifications: RFC 6902 patches relative to the tomorrow_workout object \
   (e.g. "/exercises/0/sets"); empty list if no changes are needed
-- Only suggest modifications for recovery or safety reasons, not cosmetic changes
+- Only suggest modifications for clear recovery or performance reasons
 </constraints>"""
     return _ROLE, user

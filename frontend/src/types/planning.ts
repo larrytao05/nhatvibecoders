@@ -48,6 +48,7 @@ export interface Regimen {
   id: number;
   user_id: number;
   name: string;
+  goals?: string;
   description: string | null;
   theme: string | null;
   plan: RegimenPlan;

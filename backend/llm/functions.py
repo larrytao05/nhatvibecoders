@@ -1,46 +1,54 @@
 from .client import query
-from .constants import DAYS_OF_WEEK, EXERCISE_DB, MUSCLE_GROUPS
+from .constants import DAYS_OF_WEEK, EXERCISE_DB
 from .prompts import (
     build_complete_workout_messages,
     build_modify_messages,
     build_step1_messages,
     build_step_n_messages,
 )
-from .schemas import DayWorkout, ModifyRegimenOutput, WeeklyPlan, WorkoutLogEntry
+from .schemas import DayPlan, DayWorkout, ModifyRegimenOutput, WeeklyPlan, WorkoutLogEntry
+
+
+# ── Primitive building blocks (also exported for streaming use) ──────────────
+
+async def generate_weekly_plan(onboarding: dict) -> WeeklyPlan:
+    """Step 1 of HTN: generate the high-level weekly skeleton."""
+    system, user = build_step1_messages(onboarding)
+    return await query(system, user, WeeklyPlan)
+
+
+async def expand_day(onboarding: dict, weekly_plan: WeeklyPlan, day_plan: DayPlan) -> DayWorkout:
+    """Step N of HTN: expand one workout day into a full exercise list."""
+    exercises = _filter_exercises(day_plan.muscle_groups)
+    sys_msg, usr_msg = build_step_n_messages(onboarding, weekly_plan, day_plan, exercises)
+    return await query(sys_msg, usr_msg, DayWorkout)
 
 
 # ── Create regimen (HTN expansion) ───────────────────────────────────────────
 
 async def create_regimen(onboarding: dict) -> dict:
     """
-    Two-phase HTN expansion:
-      1. Generate a high-level weekly plan (muscle groups per day).
-      2. In parallel, expand each workout day into a full exercise list.
+    Full HTN expansion used by the Flask endpoint.
+    Calls generate_weekly_plan then expand_day sequentially for each workout day.
 
-    Returns a regimen dict ready to be stored in Regimen.plan_json:
-      {
-        "onboarding": {...},
-        "schedule":   [ DayPlan, ... ],          # 7 entries
-        "workouts":   { "Monday": [Exercise, ...], ... }  # workout days only
-      }
+    Returns:
+      { "onboarding": {...}, "schedule": [...], "workouts": { "Monday": [...], ... } }
     """
-    # Step 1 — weekly overview
-    system, user = build_step1_messages(onboarding)
-    weekly_plan: WeeklyPlan = await query(system, user, WeeklyPlan)
+    print("  [LLM call 1] Generating weekly schedule...")
+    weekly_plan = await generate_weekly_plan(onboarding)
+    print("  [LLM call 1] Done.")
 
-    # Step N — sequential expansion of non-rest days (avoids rate limit spikes)
     workout_days = [d for d in weekly_plan.schedule if d.muscle_groups]
+    rest_days = [d.day for d in weekly_plan.schedule if not d.muscle_groups]
+    print(f"  Workout days: {[d.day for d in workout_days]}")
+    print(f"  Rest days:    {rest_days}")
 
-    day_workouts: list[DayWorkout] = []
-    for day_plan in workout_days:
-        exercises = _filter_exercises(day_plan.muscle_groups)
-        sys_msg, usr_msg = build_step_n_messages(onboarding, weekly_plan, day_plan, exercises)
-        day_workouts.append(await query(sys_msg, usr_msg, DayWorkout))
-
-    workouts_by_day = {
-        dw.day: [e.model_dump() for e in dw.exercises]
-        for dw in day_workouts
-    }
+    workouts_by_day = {}
+    for i, day_plan in enumerate(workout_days, start=2):
+        print(f"  [LLM call {i}] Expanding {day_plan.day} ({', '.join(day_plan.muscle_groups)})...")
+        dw = await expand_day(onboarding, weekly_plan, day_plan)
+        workouts_by_day[dw.day] = [e.model_dump() for e in dw.exercises]
+        print(f"  [LLM call {i}] Done — {len(dw.exercises)} exercises.")
 
     return {
         "onboarding": onboarding,
@@ -51,9 +59,9 @@ async def create_regimen(onboarding: dict) -> dict:
 
 def _filter_exercises(muscle_groups: list[str]) -> list[str]:
     """
-    Return the subset of EXERCISE_DB relevant to the given muscle groups.
-    Currently returns the full list; add a muscle_group → exercise mapping
-    here once the exercise DB is annotated.
+    Return exercises relevant to the given muscle groups.
+    Currently returns the full list; add a muscle_group → exercise mapping here
+    once the exercise DB is annotated.
     """
     return EXERCISE_DB
 
@@ -65,15 +73,6 @@ async def modify_regimen(
     current_regimen: dict,
     feedback: str,
 ) -> dict:
-    """
-    Given user feedback, return RFC 6902 JSON Patch operations to update the regimen.
-
-    Returns:
-      { "patches": [...], "reasoning": "..." }
-
-    The caller is responsible for validating and applying patches to current_regimen
-    before persisting (e.g. using the `jsonpatch` library).
-    """
     system, user = build_modify_messages(onboarding, current_regimen, feedback)
     result: ModifyRegimenOutput = await query(system, user, ModifyRegimenOutput)
     return result.model_dump()
@@ -87,20 +86,17 @@ async def complete_workout(
     completed_workout: dict,
     health_metrics: dict,
     today_day: str,
+    past_logs: list[dict] = None,
 ) -> dict:
     """
-    After a workout is finished, generate a log entry for today.
+    Generate a log entry after a workout is finished.
 
-    Returns a WorkoutLogEntry dict:
-      {
-        "observations":  "...",        # free-text session summary
-        "modifications": [RFC 6902 patches relative to tomorrow's workout object]
-      }
+    past_logs: previous WorkoutLog entries for this user (newest first).
+               Injected as context so the LLM can identify trends and inform
+               tomorrow's modification with historical performance data.
 
-    The caller appends this to the user's append-only daily log.
-    Patches in modifications are relative to the tomorrow workout object
-    (e.g. "/exercises/0/sets"), not to the full regimen — the Flask layer
-    must resolve the absolute path before applying them.
+    Returns:
+      { "observations": "...", "modifications": [RFC 6902 patches vs tomorrow workout] }
     """
     tomorrow_day = DAYS_OF_WEEK[(DAYS_OF_WEEK.index(today_day) + 1) % 7]
     tomorrow_workout = {
@@ -115,6 +111,7 @@ async def complete_workout(
         health_metrics,
         today_day,
         tomorrow_workout,
+        past_logs=past_logs or [],
     )
     result: WorkoutLogEntry = await query(system, user, WorkoutLogEntry)
     return result.model_dump()

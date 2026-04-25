@@ -1,5 +1,15 @@
-import React, { createContext, ReactNode, useContext, useEffect, useState } from "react";
-import { getMockRegimen, getMockReplacementRegimen, getMockUser, getMockWorkoutById, getMockWorkouts } from "../mocks/api";
+import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createUser,
+  createRegimen,
+  DEFAULT_USERNAME,
+  getUser,
+  getUserWorkouts,
+  logWorkout,
+  requestRegimenTweak,
+  requestWorkoutCompletion,
+} from "../api/backend";
+import { getMockRegimen, getMockReplacementRegimen, getMockWorkoutById, getMockWorkouts } from "../mocks/api";
 import { BackendUser, ExerciseLog, OnboardingProfile, Regimen, RegimenDay, Workout } from "../types/planning";
 
 interface WorkoutPlannerContextValue {
@@ -12,8 +22,11 @@ interface WorkoutPlannerContextValue {
   currentWorkout: Workout | null;
   exerciseLogs: Record<number, ExerciseLog>;
   isAiProcessing: boolean;
+  authComplete: boolean;
   onboardingComplete: boolean;
   completionRatio: number;
+  loginUser: (username: string) => Promise<void>;
+  signupUser: (username: string) => Promise<void>;
   setBiometricField: (field: "height" | "current_weight" | "estimated_bf", value: string) => void;
   toggleGoal: (goal: string) => void;
   setFrequency: (frequency: number) => void;
@@ -47,17 +60,37 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
   const [selectedDayId, setSelectedDayId] = useState("day-1");
   const [exerciseLogs, setExerciseLogs] = useState<Record<number, ExerciseLog>>({});
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [authComplete, setAuthComplete] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
 
-  useEffect(() => {
-    async function hydrateMocks() {
-      const [mockUser, mockWorkouts] = await Promise.all([getMockUser(), getMockWorkouts()]);
-      setUser(mockUser);
-      setWorkouts(mockWorkouts);
-    }
+  const finishAuth = async (authenticatedUser: BackendUser) => {
+    const fallbackWorkouts = await getMockWorkouts();
+    const apiWorkouts = await getUserWorkouts(authenticatedUser.username).catch(() => []);
 
-    hydrateMocks();
-  }, []);
+    setUser(authenticatedUser);
+    setWorkouts(apiWorkouts.length > 0 ? apiWorkouts : fallbackWorkouts);
+    setAuthComplete(true);
+  };
+
+  const loginUser = async (username: string) => {
+    setIsAiProcessing(true);
+    try {
+      const authenticatedUser = await getUser(username.trim(), onboarding);
+      await finishAuth(authenticatedUser);
+    } finally {
+      setIsAiProcessing(false);
+    }
+  };
+
+  const signupUser = async (username: string) => {
+    setIsAiProcessing(true);
+    try {
+      const authenticatedUser = await createUser(username.trim(), null, onboarding);
+      await finishAuth(authenticatedUser);
+    } finally {
+      setIsAiProcessing(false);
+    }
+  };
 
   const selectedDay = regimen?.plan.days.find((day) => day.id === selectedDayId) ?? regimen?.plan.days[0] ?? null;
 
@@ -125,8 +158,18 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
   const generateRegimenFromText = async () => {
     setIsAiProcessing(true);
     const mockRegimen = await getMockRegimen();
-    setRegimen(mockRegimen);
-    setSelectedDayId(mockRegimen.plan.days[0]?.id ?? "day-1");
+    const username = user?.username ?? DEFAULT_USERNAME;
+
+    try {
+      const created = await createRegimen(username, mockRegimen, onboarding);
+      setRegimen(created.regimen);
+      setWorkouts((previous) => [...created.plannedWorkouts, ...previous.filter((workout) => workout.id > 0)]);
+      setSelectedDayId(created.regimen.plan.days[0]?.id ?? "day-1");
+    } catch (error) {
+      setRegimen(mockRegimen);
+      setSelectedDayId(mockRegimen.plan.days[0]?.id ?? "day-1");
+    }
+
     setOnboardingComplete(true);
     setIsAiProcessing(false);
   };
@@ -156,6 +199,19 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     setIsAiProcessing(true);
     await new Promise((resolve) => setTimeout(resolve, 900));
     if (currentWorkout) {
+      const username = user?.username ?? DEFAULT_USERNAME;
+      let completedWorkout: Workout | null = null;
+
+      try {
+        completedWorkout = await logWorkout(username, currentWorkout, exerciseLogs);
+        setWorkouts((previous) => [
+          completedWorkout as Workout,
+          ...previous.filter((workout) => workout.id !== completedWorkout?.id && workout.id !== currentWorkout.id),
+        ]);
+      } catch (error) {
+        // Keep the local completion state even if the backend log call is unavailable.
+      }
+
       setExerciseLogs((previous) => {
         const next = { ...previous };
         currentWorkout.exercises.forEach((exercise) => {
@@ -168,12 +224,33 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
         });
         return next;
       });
+
+      if (completedWorkout && regimen && selectedDay) {
+        try {
+          await requestWorkoutCompletion(username, completedWorkout.id, regimen.id, selectedDay.title);
+        } catch (error) {
+          // Keep the logged workout even if LLM completion feedback fails.
+        }
+      }
     }
     setIsAiProcessing(false);
   };
 
-  const tweakPlanWithFeedback = async (_feedback: string) => {
+  const tweakPlanWithFeedback = async (feedback: string) => {
     setIsAiProcessing(true);
+    if (regimen) {
+      try {
+        const updated = await requestRegimenTweak(user?.username ?? DEFAULT_USERNAME, regimen.id, feedback);
+        setRegimen(updated.regimen);
+        setWorkouts((previous) => [...updated.plannedWorkouts, ...previous.filter((workout) => workout.id > 0)]);
+        setSelectedDayId(updated.regimen.plan.days[0]?.id ?? "day-1");
+        setIsAiProcessing(false);
+        return;
+      } catch (error) {
+        // Fall through to mock replacement output when the LLM route is unavailable.
+      }
+    }
+
     const replacement = await getMockReplacementRegimen();
     setRegimen(replacement);
     setSelectedDayId(replacement.plan.days[0]?.id ?? "day-1");
@@ -192,8 +269,11 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
         currentWorkout,
         exerciseLogs,
         isAiProcessing,
+        authComplete,
         onboardingComplete,
         completionRatio,
+        loginUser,
+        signupUser,
         setBiometricField,
         toggleGoal,
         setFrequency,
