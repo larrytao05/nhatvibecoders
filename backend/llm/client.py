@@ -38,9 +38,29 @@ async def query(system: str, user: str, output_model: Type[T]) -> T:
             )
             tool_block = next(b for b in response.content if b.type == "tool_use")
             return output_model.model_validate(tool_block.input)
+        except anthropic.RateLimitError as exc:
+            last_exc = exc
+            if attempt < MAX_RETRIES - 1:
+                wait = _rate_limit_wait(exc)
+                print(f"  [rate limit] waiting {wait}s before retry {attempt + 1}/{MAX_RETRIES}...")
+                await asyncio.sleep(wait)
         except Exception as exc:
             last_exc = exc
             if attempt < MAX_RETRIES - 1:
                 await asyncio.sleep(2**attempt)
 
     raise last_exc
+
+
+def _rate_limit_wait(exc: anthropic.RateLimitError) -> int:
+    """Return seconds to wait before retrying a rate-limited request.
+
+    Prefers the retry-after header returned by the API; falls back to 60s.
+    """
+    try:
+        retry_after = exc.response.headers.get("retry-after")
+        if retry_after:
+            return int(retry_after) + 1  # +1s buffer
+    except Exception:
+        pass
+    return 60

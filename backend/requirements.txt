@@ -5,3 +5,5 @@ python-dotenv
 anthropic
 pydantic
 jsonpatch
+pytest
+pytest-asyncio

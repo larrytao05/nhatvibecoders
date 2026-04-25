@@ -1,5 +1,3 @@
-import asyncio
-
 from .client import query
 from .constants import DAYS_OF_WEEK, EXERCISE_DB, MUSCLE_GROUPS
 from .prompts import (
@@ -30,15 +28,14 @@ async def create_regimen(onboarding: dict) -> dict:
     system, user = build_step1_messages(onboarding)
     weekly_plan: WeeklyPlan = await query(system, user, WeeklyPlan)
 
-    # Step N — parallel expansion of non-rest days
+    # Step N — sequential expansion of non-rest days (avoids rate limit spikes)
     workout_days = [d for d in weekly_plan.schedule if d.muscle_groups]
 
-    async def _expand(day_plan):
+    day_workouts: list[DayWorkout] = []
+    for day_plan in workout_days:
         exercises = _filter_exercises(day_plan.muscle_groups)
         sys_msg, usr_msg = build_step_n_messages(onboarding, weekly_plan, day_plan, exercises)
-        return await query(sys_msg, usr_msg, DayWorkout)
-
-    day_workouts: list[DayWorkout] = await asyncio.gather(*[_expand(d) for d in workout_days])
+        day_workouts.append(await query(sys_msg, usr_msg, DayWorkout))
 
     workouts_by_day = {
         dw.day: [e.model_dump() for e in dw.exercises]
