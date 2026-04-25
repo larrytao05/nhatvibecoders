@@ -521,6 +521,22 @@ def _normalize_follow_up_questions(raw_follow_ups: list[str], context: dict[str,
     return _suggest_questions_from_context(context)[:3]
 
 
+def _infer_focus_from_text(question: str, answer_snapshot: str) -> Optional[str]:
+    combined = f"{question or ''} {answer_snapshot or ''}".lower()
+    keyword_map: list[tuple[str, list[str]]] = [
+        ("Legs", ["leg", "legs", "lower body", "squat", "quads", "hamstring", "glute", "calf"]),
+        ("Back + Biceps", ["pull", "back", "lats", "row", "biceps"]),
+        ("Chest + Triceps", ["push", "chest", "bench", "pec", "triceps", "shoulder press"]),
+        ("Shoulders + Core", ["shoulder", "delts", "core", "abs", "midsection"]),
+        ("Recovery", ["recover", "recovery", "rest", "light day", "mobility", "deload"]),
+        ("Full Body", ["full body", "full-body", "total body"]),
+    ]
+    for focus, keywords in keyword_map:
+        if any(keyword in combined for keyword in keywords):
+            return focus
+    return None
+
+
 def _compose_answer_with_claude(question: str, context: dict[str, Any], style: str) -> Optional[dict[str, Any]]:
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
@@ -1372,6 +1388,7 @@ def research_actions(username: str):
     payload = flask.request.get_json(silent=True) or {}
     action = payload.get("action")
     answer_snapshot = payload.get("answer_snapshot")
+    question_text = str(payload.get("question") or "").strip()
 
     if action not in ["apply_to_next_workout", "save_as_note", "regenerate"]:
         return {"error": "action must be apply_to_next_workout|save_as_note|regenerate"}, 400
@@ -1382,16 +1399,55 @@ def research_actions(username: str):
             return {"error": "user not found"}, 404
 
         if action == "apply_to_next_workout":
-            note = "Applied research guidance to next workout plan."
+            focus = _infer_focus_from_text(question_text, str(answer_snapshot or ""))
+            if focus is None:
+                return {
+                    "error": "Could not infer a workout focus from the latest coach guidance. Try asking with clearer intent like legs, push, pull, or recovery."
+                }, 400
+
+            planned_workout = Workout(
+                user_id=user.id,
+                mood="planned_from_research",
+                muscles_worked=focus,
+            )
+            session.add(planned_workout)
+            session.flush()
+
+            note = f"Applied research guidance and created workout #{planned_workout.id} focused on {focus}."
             user.log = f"{(user.log or '').strip()}\n{note}".strip()
             session.commit()
-            return {"ok": True, "message": note}
+            return {
+                "ok": True,
+                "message": note,
+                "applied_workout": _serialize_workout(planned_workout),
+            }
 
         if action == "save_as_note":
-            content = str(answer_snapshot or "Saved empty note")
-            user.log = f"{(user.log or '').strip()}\nResearch note: {content}".strip()
+            snapshot_text = str(answer_snapshot or "").strip()
+            if not question_text and not snapshot_text:
+                return {"error": "Nothing to save yet. Ask a question first."}, 400
+
+            note_summary = f"Research note saved for: {question_text or 'manual note'}"
+            user.log = f"{(user.log or '').strip()}\n{note_summary}".strip()
+
+            log_entry = WorkoutLog(
+                user_id=user.id,
+                regimen_id=None,
+                workout_id=None,
+                log_date=date_type.today(),
+                day="Research",
+                observations=f"Q: {question_text or '(none)'}\nA: {snapshot_text or '(none)'}",
+                modifications_json=json.dumps(
+                    {
+                        "source": "research_note",
+                        "question": question_text,
+                        "answer_snapshot": snapshot_text,
+                    }
+                ),
+            )
+            session.add(log_entry)
             session.commit()
-            return {"ok": True, "message": "Saved research note to user log"}
+            return {"ok": True, "message": "Saved research note to workout logs", "log_id": log_entry.id}
 
         if action == "regenerate":
             question = payload.get("question")

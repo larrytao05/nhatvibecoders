@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useWorkoutPlanner } from "../state/WorkoutPlannerContext";
 
 const API_BASE = "http://10.48.80.102:5050";
@@ -13,16 +13,26 @@ interface ResearchResponse {
   safety_flags: string[];
 }
 
+interface HistoryItem {
+  id: string;
+  question: string;
+  answer: string;
+}
+
 export function ResearchScreen() {
   const { user } = useWorkoutPlanner();
   const [question, setQuestion] = useState("");
   const [lastAsked, setLastAsked] = useState("");
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
-  const [quickActionsExpanded, setQuickActionsExpanded] = useState(false);
+  const [regenerateExpanded, setRegenerateExpanded] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [answer, setAnswer] = useState<ResearchResponse | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [conversationY, setConversationY] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const mainScrollRef = useRef<ScrollView>(null);
 
   const username = user?.username ?? "demo-athlete";
 
@@ -62,7 +72,7 @@ export function ResearchScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function askQuestion(prompt: string) {
+  async function askQuestion(prompt: string, options?: { scrollToResponse?: boolean }) {
     if (!prompt.trim()) {
       setStatusMessage("Type a question first.");
       return;
@@ -81,7 +91,20 @@ export function ResearchScreen() {
       setLastAsked(prompt.trim());
       setQuestion(prompt);
       setSuggestions(response.follow_ups ?? suggestions);
+      setHistory((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          question: prompt.trim(),
+          answer: response.direct_answer,
+        },
+      ]);
       setStatusMessage("Answer generated from research context.");
+      if (options?.scrollToResponse) {
+        requestAnimationFrame(() => {
+          mainScrollRef.current?.scrollTo({ y: Math.max(conversationY - 12, 0), animated: true });
+        });
+      }
     } catch (error) {
       setStatusMessage(`Failed to ask question: ${String(error)}`);
     } finally {
@@ -101,7 +124,7 @@ export function ResearchScreen() {
         method: "POST",
         body: JSON.stringify({
           action,
-          question: question.trim(),
+          question: (lastAsked || question).trim(),
           style: "concise",
           answer_snapshot: answer?.direct_answer ?? "",
         }),
@@ -116,7 +139,7 @@ export function ResearchScreen() {
 
   return (
     <View className="flex-1 bg-surface">
-      <ScrollView className="flex-1" contentContainerClassName="px-5 pb-44 pt-14">
+      <ScrollView ref={mainScrollRef} className="flex-1" contentContainerClassName="px-5 pb-44 pt-14">
         <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Research</Text>
         <Text className="mt-2 text-4xl font-black text-ink">Coach chat</Text>
         <Text className="mt-3 text-base leading-6 text-muted">
@@ -154,7 +177,11 @@ export function ResearchScreen() {
                   <Text className="text-base font-semibold text-muted">Loading context-aware question ideas...</Text>
                 ) : (
                   suggestions.map((chip) => (
-                    <Pressable key={chip} onPress={() => askQuestion(chip)} className="rounded-xl bg-white px-4 py-3">
+                    <Pressable
+                      key={chip}
+                      onPress={() => askQuestion(chip, { scrollToResponse: true })}
+                      className="rounded-xl bg-white px-4 py-3"
+                    >
                       <Text className="text-base font-black leading-6 text-slate-700">{chip}</Text>
                     </Pressable>
                   ))
@@ -167,8 +194,19 @@ export function ResearchScreen() {
           {statusMessage ? <Text className="mt-4 text-base font-semibold text-slate-600">{statusMessage}</Text> : null}
         </View>
 
-        <View className="mt-4 flex-1 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <Text className="text-sm font-black uppercase tracking-[2px] text-muted">Conversation</Text>
+        <View
+          onLayout={(event) => setConversationY(event.nativeEvent.layout.y)}
+          className="mt-4 flex-1 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <View className="flex-row items-center justify-between">
+            <Text className="text-sm font-black uppercase tracking-[2px] text-muted">Conversation</Text>
+            <Pressable
+              onPress={() => setHistoryOpen(true)}
+              className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5"
+            >
+              <Text className="text-xs font-black uppercase tracking-[1px] text-slate-700">History</Text>
+            </Pressable>
+          </View>
 
         {lastAsked ? (
           <View className="mt-4 items-end">
@@ -221,7 +259,11 @@ export function ResearchScreen() {
         <Text className="mt-5 text-sm font-black uppercase tracking-[2px] text-muted">Follow-up chips</Text>
         <View className="mt-2 gap-2">
           {(answer?.follow_ups ?? []).map((chip) => (
-            <Pressable key={chip} onPress={() => askQuestion(chip)} className="rounded-2xl bg-blue-50 px-4 py-3">
+            <Pressable
+              key={chip}
+              onPress={() => askQuestion(chip, { scrollToResponse: true })}
+              className="rounded-2xl bg-blue-50 px-4 py-3"
+            >
               <Text className="text-base font-black leading-6 text-brand">{chip}</Text>
             </Pressable>
           ))}
@@ -231,24 +273,60 @@ export function ResearchScreen() {
       </ScrollView>
 
       <View className="absolute bottom-0 left-0 right-0 border-t border-slate-200 bg-white px-5 pb-6 pt-4">
-        <Pressable onPress={() => setQuickActionsExpanded((value) => !value)} className="flex-row items-center justify-between">
-          <Text className="text-sm font-black uppercase tracking-[2px] text-muted">Quick actions</Text>
-          <Text className="text-sm font-black text-brand">{quickActionsExpanded ? "Minimize" : "Expand"}</Text>
-        </Pressable>
-        {quickActionsExpanded ? (
-          <View className="mt-3 flex-row gap-2">
-            <Pressable onPress={() => runAction("apply_to_next_workout")} className="flex-1 rounded-2xl bg-slate-900 px-3 py-3">
-              <Text className="text-center text-base font-black text-white">Apply</Text>
-            </Pressable>
-            <Pressable onPress={() => runAction("save_as_note")} className="flex-1 rounded-2xl bg-slate-100 px-3 py-3">
-              <Text className="text-center text-base font-black text-slate-700">Save as note</Text>
-            </Pressable>
-            <Pressable onPress={() => runAction("regenerate")} className="flex-1 rounded-2xl bg-brand px-3 py-3">
-              <Text className="text-center text-base font-black text-white">Regenerate</Text>
-            </Pressable>
-          </View>
+        <View className="items-center">
+          <Pressable
+            onPress={() => setRegenerateExpanded((value) => !value)}
+            className="h-7 w-10 items-center justify-center rounded-full border border-slate-300 bg-slate-50"
+            accessibilityRole="button"
+            accessibilityLabel={regenerateExpanded ? "Collapse footer actions" : "Expand footer actions"}
+          >
+            <Text className="text-base font-black text-slate-600">{regenerateExpanded ? "⌄" : "⌃"}</Text>
+          </Pressable>
+        </View>
+        {regenerateExpanded ? (
+          <Pressable onPress={() => runAction("regenerate")} className="mt-3 rounded-2xl bg-brand px-3 py-3">
+            <Text className="text-center text-base font-black text-white">Regenerate</Text>
+          </Pressable>
         ) : null}
       </View>
+
+      <Modal visible={historyOpen} animationType="slide" transparent onRequestClose={() => setHistoryOpen(false)}>
+        <View className="flex-1 bg-black/35">
+          <View className="mt-20 flex-1 rounded-t-3xl bg-white px-5 pb-10 pt-5">
+            <View className="flex-row items-center justify-between">
+              <Text className="text-sm font-black uppercase tracking-[2px] text-muted">Coach chat history</Text>
+              <Pressable onPress={() => setHistoryOpen(false)} className="rounded-xl bg-slate-100 px-3 py-2">
+                <Text className="text-sm font-black text-slate-700">Close</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView className="mt-4 flex-1">
+              {history.length === 0 ? (
+                <View className="rounded-2xl bg-slate-100 px-4 py-3">
+                  <Text className="text-base font-semibold text-slate-700">
+                    No messages yet. Ask a question to start your history.
+                  </Text>
+                </View>
+              ) : (
+                history.map((item) => (
+                  <View key={item.id} className="mb-3">
+                    <View className="items-end">
+                      <View className="max-w-[88%] rounded-2xl bg-brand px-4 py-3">
+                        <Text className="text-base font-semibold leading-6 text-white">{item.question}</Text>
+                      </View>
+                    </View>
+                    <View className="mt-2 items-start">
+                      <View className="max-w-[92%] rounded-2xl bg-slate-100 px-4 py-3">
+                        <Text className="text-base font-semibold leading-6 text-slate-800">{item.answer}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
