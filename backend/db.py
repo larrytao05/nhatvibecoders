@@ -22,6 +22,7 @@ class User(Base):
     current_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     height: Mapped[float | None] = mapped_column(Float, nullable=True)
     estimated_bf: Mapped[float | None] = mapped_column(Float, nullable=True)
+    log: Mapped[str | None] = mapped_column(Text, nullable=True)
     workouts: Mapped[list["Workout"]] = relationship("Workout", back_populates="user", cascade="all, delete-orphan")
     regimens: Mapped[list["Regimen"]] = relationship("Regimen", back_populates="user", cascade="all, delete-orphan")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
