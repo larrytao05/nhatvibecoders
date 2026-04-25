@@ -23,7 +23,11 @@ export function ActiveWorkoutScreen() {
   }, [fetchWorkoutById, selectedDay?.workout_id]);
 
   const finishWorkout = async () => {
-    await completeWorkout();
+    await completeWorkout({
+      overallFeel: 3,
+      concerns: [],
+      notes: "Completed from active workout screen.",
+    });
     setFeedbackVisible(true);
   };
 

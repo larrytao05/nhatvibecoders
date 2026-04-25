@@ -1,4 +1,15 @@
-import { BackendUser, Exercise, ExerciseLog, OnboardingProfile, Regimen, RegimenDay, Workout } from "../types/planning";
+import {
+  BackendUser,
+  Exercise,
+  ExerciseLog,
+  OnboardingProfile,
+  Regimen,
+  RegimenDay,
+  Workout,
+  WorkoutCompletionSuggestion,
+  WorkoutPreview,
+  WorkoutReviewFeedback,
+} from "../types/planning";
 
 declare const process: { env?: Record<string, string | undefined> };
 
@@ -16,6 +27,11 @@ type MuscleCoverage = string | string[] | null | undefined;
 interface WorkoutListResponse {
   username: string;
   workouts: BackendWorkoutResponse[];
+}
+
+interface LatestRegimenResponse {
+  regimen: BackendRegimenResponse | null;
+  scheduled_workouts?: BackendWorkoutResponse[];
 }
 
 type BackendUserResponse = Partial<BackendUser> & {
@@ -66,6 +82,19 @@ export interface RegimenWithWorkouts {
   regimen: Regimen;
   plannedWorkouts: Workout[];
   reasoning?: string;
+}
+
+interface WorkoutCompletionResponse {
+  id: number;
+  observations: string;
+  modifications: Array<{ op: string; path: string; value?: unknown }>;
+  baseline_next_workout: WorkoutPreview | null;
+  suggested_next_workout: WorkoutPreview | null;
+}
+
+interface WorkoutDecisionResponse {
+  decision: "accept" | "reject";
+  next_workout: BackendWorkoutResponse;
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -158,11 +187,27 @@ function isLlmRegimenPlan(plan: BackendRegimenResponse["plan"]): plan is LlmRegi
   return Boolean(plan && "schedule" in plan && "workouts" in plan);
 }
 
-function normalizeRegimen(response: BackendRegimenResponse): RegimenWithWorkouts {
+function normalizeRegimen(response: BackendRegimenResponse, scheduledWorkoutResponses: BackendWorkoutResponse[] = []): RegimenWithWorkouts {
+  const scheduledWorkouts = scheduledWorkoutResponses.map(normalizeWorkout);
+  const scheduledWorkoutsByDay = new Map<string, Workout>();
+  scheduledWorkouts.forEach((workout) => {
+    if (workout.scheduled_day && !scheduledWorkoutsByDay.has(workout.scheduled_day)) {
+      scheduledWorkoutsByDay.set(workout.scheduled_day, workout);
+    }
+  });
+
   if (!isLlmRegimenPlan(response.plan)) {
     return {
-      regimen: response as Regimen,
-      plannedWorkouts: [],
+      regimen: {
+        ...(response as Regimen),
+        plan: {
+          days: (response as Regimen).plan.days.map((day) => ({
+            ...day,
+            workout_id: scheduledWorkoutsByDay.get(day.title)?.id ?? day.workout_id,
+          })),
+        },
+      },
+      plannedWorkouts: scheduledWorkouts,
       reasoning: response.reasoning,
     };
   }
@@ -188,7 +233,7 @@ function normalizeRegimen(response: BackendRegimenResponse): RegimenWithWorkouts
     );
     const focusMuscles = workoutMuscles.length > 0 ? workoutMuscles : dayPlan.muscle_groups;
 
-    if (workoutId !== null) {
+    if (!scheduledWorkout && workoutId !== null && exercises.length > 0) {
       plannedWorkouts.push({
         id: workoutId,
         user_id: response.user_id,
@@ -216,7 +261,7 @@ function normalizeRegimen(response: BackendRegimenResponse): RegimenWithWorkouts
       ...response,
       plan: { days },
     },
-    plannedWorkouts,
+    plannedWorkouts: [...scheduledWorkouts, ...plannedWorkouts],
     reasoning: response.reasoning,
   };
 }
@@ -278,6 +323,11 @@ export async function getUserWorkouts(username: string): Promise<Workout[]> {
   return response.workouts.map(normalizeWorkout);
 }
 
+export async function getLatestRegimen(username: string): Promise<RegimenWithWorkouts | null> {
+  const response = await requestJson<LatestRegimenResponse>(`/users/${encodeURIComponent(username)}/regimens/latest`);
+  return response.regimen ? normalizeRegimen(response.regimen, response.scheduled_workouts ?? []) : null;
+}
+
 export async function logWorkout(username: string, workout: Workout, logs: Record<number, ExerciseLog>): Promise<Workout> {
   const exercises = workout.exercises.map((exercise) => ({
     name: exercise.name,
@@ -314,6 +364,33 @@ export async function createRegimen(username: string, regimen: Regimen, profile:
   return normalizeRegimen(created);
 }
 
+export async function createRegimenSkeleton(
+  username: string,
+  regimen: Regimen,
+  profile: OnboardingProfile,
+): Promise<RegimenWithWorkouts> {
+  const created = await requestJson<BackendRegimenResponse>(`/users/${encodeURIComponent(username)}/regimens/skeleton`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: regimen.name,
+      description: regimen.description,
+      theme: regimen.theme,
+      onboarding: toBackendOnboarding(profile),
+    }),
+  });
+
+  return normalizeRegimen(created);
+}
+
+export async function expandRegimenDay(username: string, regimenId: number, day: string): Promise<RegimenWithWorkouts> {
+  const updated = await requestJson<BackendRegimenResponse>(`/users/${encodeURIComponent(username)}/regimens/${regimenId}/expand-day`, {
+    method: "POST",
+    body: JSON.stringify({ day }),
+  });
+
+  return normalizeRegimen(updated);
+}
+
 export async function requestRegimenTweak(username: string, regimenId: number, feedback: string): Promise<RegimenWithWorkouts> {
   const updated = await requestJson<BackendRegimenResponse>(`/users/${encodeURIComponent(username)}/regimens/${regimenId}`, {
     method: "PATCH",
@@ -328,13 +405,39 @@ export async function requestWorkoutCompletion(
   workoutId: number,
   regimenId: number,
   todayDay: string,
-): Promise<unknown> {
-  return requestJson<unknown>(`/users/${encodeURIComponent(username)}/workouts/${workoutId}/complete`, {
+  feedback: WorkoutReviewFeedback,
+): Promise<WorkoutCompletionSuggestion> {
+  const response = await requestJson<WorkoutCompletionResponse>(`/users/${encodeURIComponent(username)}/workouts/${workoutId}/complete`, {
     method: "POST",
     body: JSON.stringify({
       regimen_id: regimenId,
       today_day: todayDay,
-      health_metrics: {},
+      health_metrics: {
+        workout_review: {
+          overall_feel: feedback.overallFeel,
+          concerns: feedback.concerns,
+          notes: feedback.notes,
+        },
+      },
     }),
   });
+  return {
+    logId: response.id,
+    observations: response.observations,
+    modifications: response.modifications,
+    baselineWorkout: response.baseline_next_workout,
+    suggestedWorkout: response.suggested_next_workout,
+  };
+}
+
+export async function decideNextWorkoutSuggestion(
+  username: string,
+  logId: number,
+  decision: "accept" | "reject",
+): Promise<Workout> {
+  const response = await requestJson<WorkoutDecisionResponse>(
+    `/users/${encodeURIComponent(username)}/logs/${logId}/next-workout/${decision}`,
+    { method: "POST" },
+  );
+  return normalizeWorkout(response.next_workout);
 }

@@ -1,7 +1,7 @@
 import os
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 
@@ -55,12 +55,16 @@ class Workout(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    regimen_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Regimens.id"), nullable=True, index=True)
+    source_log_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     user: Mapped["User"] = relationship("User", back_populates="workouts")
     exercises: Mapped[list["Exercise"]] = relationship(
         "Exercise", back_populates="workout", cascade="all, delete-orphan"
     )
     mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
     muscles_worked: Mapped[str] = mapped_column(String(255), nullable=False)
+    scheduled_day: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -110,6 +114,7 @@ class WorkoutLog(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     regimen_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Regimens.id"), nullable=True, index=True)
     workout_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=True)
+    next_workout_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=True)
     user: Mapped["User"] = relationship("User", back_populates="logs")
     log_date: Mapped[date] = mapped_column(Date, nullable=False)   # actual calendar date
     day: Mapped[str] = mapped_column(String(16), nullable=False)   # e.g. "Monday"
@@ -132,6 +137,47 @@ def get_engine():
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _ensure_columns(engine)
+
+
+def _ensure_columns(engine) -> None:
+    """Lightweight forward migration for local/dev databases without Alembic."""
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "Workouts" not in table_names or "WorkoutLogs" not in table_names:
+        return
+
+    workout_columns = {column["name"] for column in inspector.get_columns("Workouts")}
+    log_columns = {column["name"] for column in inspector.get_columns("WorkoutLogs")}
+    additions: list[tuple[str, str, str]] = []
+
+    if "regimen_id" not in workout_columns:
+        additions.append(("Workouts", "regimen_id", "INTEGER"))
+    if "source_log_id" not in workout_columns:
+        additions.append(("Workouts", "source_log_id", "INTEGER"))
+    if "scheduled_day" not in workout_columns:
+        additions.append(("Workouts", "scheduled_day", "VARCHAR(16)"))
+    if "status" not in workout_columns:
+        additions.append(("Workouts", "status", "VARCHAR(32)"))
+    if "next_workout_id" not in log_columns:
+        additions.append(("WorkoutLogs", "next_workout_id", "INTEGER"))
+    if "log_date" not in log_columns:
+        additions.append(("WorkoutLogs", "log_date", "DATE"))
+    if "day" not in log_columns:
+        additions.append(("WorkoutLogs", "day", "VARCHAR(16)"))
+    if "observations" not in log_columns:
+        additions.append(("WorkoutLogs", "observations", "TEXT"))
+    if "modifications_json" not in log_columns:
+        additions.append(("WorkoutLogs", "modifications_json", "TEXT"))
+    if "created_at" not in log_columns:
+        additions.append(("WorkoutLogs", "created_at", "TIMESTAMP WITH TIME ZONE"))
+
+    if not additions:
+        return
+
+    with engine.begin() as connection:
+        for table_name, column_name, ddl_type in additions:
+            connection.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN {column_name} {ddl_type}'))
 
 
 def get_session() -> Session:
