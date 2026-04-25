@@ -359,7 +359,7 @@ def _compose_answer_with_claude(question: str, context: dict[str, Any], style: s
     if not api_key:
         return None
 
-    model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+    model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
     system_prompt = (
         "You are a fitness coaching assistant. Return ONLY a JSON object with keys: "
         "direct_answer (string), why (array of 1-3 strings), do_this_next (array of 2-4 strings), "
