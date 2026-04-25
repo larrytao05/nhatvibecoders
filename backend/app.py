@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -734,10 +735,21 @@ def create_regimen(username: str):
         if user is None:
             return {"error": "user not found"}, 404
 
+        print(
+            f"[LLM TEST] create_regimen request received for username={username!r}; calling Claude regimen generator...",
+            flush=True,
+        )
         try:
             plan = asyncio.run(llm_create_regimen(onboarding))
         except Exception as exc:
+            print(f"[LLM TEST] create_regimen failed for username={username!r}: {exc}", flush=True)
             return {"error": f"LLM call failed: {exc}"}, 502
+        print(
+            "[LLM TEST] create_regimen succeeded "
+            f"for username={username!r}; schedule_days={len(plan.get('schedule', []))}; "
+            f"workout_days={len(plan.get('workouts', {}))}",
+            flush=True,
+        )
 
         raw_goals = onboarding.get("goals", "")
         goals_str = ", ".join(raw_goals) if isinstance(raw_goals, list) else str(raw_goals)
@@ -950,11 +962,6 @@ def research_actions(username: str):
                 return {"error": "Could not connect to AI provider. Please try again."}, 502
             response["direct_answer"] = f"{response['direct_answer']} (regenerated)"
             return {"ok": True, "question": question.strip(), "style": style, **response}
-
-@app.patch("/users/<username>/regimens/<regimen_id>")
-def modify_regimen(username: str):
-    # call Claude to modify the regimen
-    return {"ok": True}, 200
 
 if __name__ == "__main__":
     init_db()

@@ -161,9 +161,10 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     const username = user?.username ?? DEFAULT_USERNAME;
 
     try {
-      const createdRegimen = await createRegimen(username, mockRegimen);
-      setRegimen(createdRegimen);
-      setSelectedDayId(createdRegimen.plan.days[0]?.id ?? "day-1");
+      const created = await createRegimen(username, mockRegimen, onboarding);
+      setRegimen(created.regimen);
+      setWorkouts((previous) => [...created.plannedWorkouts, ...previous.filter((workout) => workout.id > 0)]);
+      setSelectedDayId(created.regimen.plan.days[0]?.id ?? "day-1");
     } catch (error) {
       setRegimen(mockRegimen);
       setSelectedDayId(mockRegimen.plan.days[0]?.id ?? "day-1");
@@ -199,11 +200,16 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     await new Promise((resolve) => setTimeout(resolve, 900));
     if (currentWorkout) {
       const username = user?.username ?? DEFAULT_USERNAME;
+      let completedWorkout: Workout | null = null;
 
       try {
-        await requestWorkoutCompletion(username, currentWorkout.id);
+        completedWorkout = await logWorkout(username, currentWorkout, exerciseLogs);
+        setWorkouts((previous) => [
+          completedWorkout as Workout,
+          ...previous.filter((workout) => workout.id !== completedWorkout?.id && workout.id !== currentWorkout.id),
+        ]);
       } catch (error) {
-        // The completion endpoint exists but is currently a backend placeholder.
+        // Keep the local completion state even if the backend log call is unavailable.
       }
 
       setExerciseLogs((previous) => {
@@ -219,11 +225,12 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
         return next;
       });
 
-      try {
-        const completedWorkout = await logWorkout(username, currentWorkout, exerciseLogs);
-        setWorkouts((previous) => [completedWorkout, ...previous.filter((workout) => workout.id !== completedWorkout.id)]);
-      } catch (error) {
-        // Keep the local completion state even if the backend is unavailable.
+      if (completedWorkout && regimen && selectedDay) {
+        try {
+          await requestWorkoutCompletion(username, completedWorkout.id, regimen.id, selectedDay.title);
+        } catch (error) {
+          // Keep the logged workout even if LLM completion feedback fails.
+        }
       }
     }
     setIsAiProcessing(false);
@@ -233,9 +240,14 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     setIsAiProcessing(true);
     if (regimen) {
       try {
-        await requestRegimenTweak(user?.username ?? DEFAULT_USERNAME, regimen.id, feedback);
+        const updated = await requestRegimenTweak(user?.username ?? DEFAULT_USERNAME, regimen.id, feedback);
+        setRegimen(updated.regimen);
+        setWorkouts((previous) => [...updated.plannedWorkouts, ...previous.filter((workout) => workout.id > 0)]);
+        setSelectedDayId(updated.regimen.plan.days[0]?.id ?? "day-1");
+        setIsAiProcessing(false);
+        return;
       } catch (error) {
-        // The backend route is currently a placeholder; use mock replacement output.
+        // Fall through to mock replacement output when the LLM route is unavailable.
       }
     }
 
