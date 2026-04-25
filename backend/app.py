@@ -1412,24 +1412,6 @@ def modify_regimen(username: str, regimen_id: int):
         return response_payload
 
 
-@app.get("/users/<username>/regimens/latest")
-def get_latest_regimen(username: str):
-    with get_session() as session:
-        user = session.query(User).filter_by(username=username).first()
-        if user is None:
-            return {"error": "user not found"}, 404
-
-        regimen = (
-            session.query(Regimen)
-            .filter_by(user_id=user.id)
-            .order_by(Regimen.updated_at.desc())
-            .first()
-        )
-        if regimen is None:
-            return {"error": "regimen not found"}, 404
-        return _serialize_regimen(regimen)
-
-
 @app.post("/users/<username>/regimens/<int:regimen_id>/apply-patches")
 def apply_patches(username: str, regimen_id: int):
     """

@@ -216,6 +216,7 @@ function normalizeRegimen(response: BackendRegimenResponse, scheduledWorkoutResp
   const llmPlan = response.plan;
   const plannedWorkouts: Workout[] = [];
   const days: RegimenDay[] = (llmPlan.schedule ?? []).map((dayPlan, index) => {
+    const scheduledWorkout = scheduledWorkoutsByDay.get(dayPlan.day);
     const exercises = llmPlan.workouts?.[dayPlan.day] ?? [];
     const scheduledWorkout = scheduledWorkoutsByDay.get(dayPlan.day);
     const hasTrainingFocus = dayPlan.muscle_groups.length > 0;
@@ -413,11 +414,6 @@ export async function requestRegimenTweak(username: string, regimenId: number, f
   });
 
   return normalizeRegimen(updated);
-}
-
-export async function getLatestRegimen(username: string): Promise<RegimenWithWorkouts> {
-  const response = await requestJson<BackendRegimenResponse>(`/users/${encodeURIComponent(username)}/regimens/latest`);
-  return normalizeRegimen(response);
 }
 
 export async function requestWorkoutCompletion(
