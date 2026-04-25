@@ -101,10 +101,39 @@ def test_log_workout_success(client):
     assert data["exercises"][0]["sets"] == 4
 
 
+def test_log_workout_aggregates_workout_muscles_from_exercises(client):
+    _create_user(client, "eve_plus")
+    r = client.post("/users/eve_plus/workouts", json={
+        "mood": "good",
+        "muscles_worked": ["Upper Chest"],
+        "exercises": [
+            {
+                "name": "Barbell Bench Press",
+                "sets": 4,
+                "reps": 8,
+                "weight": 135,
+                "rest_time": 120,
+                "muscles_worked": ["Upper Chest", "Triceps"],
+            },
+            {
+                "name": "Face Pull",
+                "sets": 3,
+                "reps": 15,
+                "weight": 40,
+                "rest_time": 45,
+                "muscles_worked": ["Rear Delt", "Traps"],
+            },
+        ],
+    })
+    assert r.status_code == 201
+    assert r.get_json()["muscles_worked"] == "Upper Chest, Triceps, Rear Delt, Traps"
+
+
 def test_log_workout_missing_muscles(client):
     _create_user(client, "frank")
     r = client.post("/users/frank/workouts", json={"exercises": SAMPLE_EXERCISES_PAYLOAD})
-    assert r.status_code == 400
+    assert r.status_code == 201
+    assert r.get_json()["muscles_worked"] == "chest, triceps"
 
 
 def test_log_workout_empty_exercises(client):
@@ -163,6 +192,7 @@ def test_create_regimen_success(client):
     assert data["plan"]["onboarding"] == SAMPLE_ONBOARDING
     assert len(data["plan"]["schedule"]) == 7
     assert "Monday" in data["plan"]["workouts"]
+    assert data["plan"]["workouts"]["Monday"][0]["muscles_worked"] == ["Upper Chest", "Front Delt", "Triceps"]
 
 
 def test_create_regimen_missing_name(client):

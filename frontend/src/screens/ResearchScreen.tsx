@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useWorkoutPlanner } from "../state/WorkoutPlannerContext";
 
-const API_BASE = "http://10.48.80.102:5000";
+const API_BASE = "http://10.48.80.102:5050";
 
 interface ResearchResponse {
   direct_answer: string;
@@ -44,7 +44,6 @@ export function ResearchScreen() {
     try {
       const suggested = await callApi<{ suggested_questions: string[] }>(`/users/${username}/research/suggestions`);
       setSuggestions(suggested.suggested_questions ?? []);
-      setStatusMessage("Loaded context and suggested questions.");
     } catch (error) {
       setStatusMessage(`Unable to load backend suggestions. (${String(error)})`);
       setSuggestions([
@@ -117,7 +116,7 @@ export function ResearchScreen() {
 
   return (
     <View className="flex-1 bg-surface">
-      <View className="flex-1 px-5 pb-44 pt-14">
+      <ScrollView className="flex-1" contentContainerClassName="px-5 pb-44 pt-14">
         <Text className="text-sm font-black uppercase tracking-[3px] text-brand">Research</Text>
         <Text className="mt-2 text-4xl font-black text-ink">Coach chat</Text>
         <Text className="mt-3 text-base leading-6 text-muted">
@@ -229,7 +228,7 @@ export function ResearchScreen() {
         </View>
 
         </View>
-      </View>
+      </ScrollView>
 
       <View className="absolute bottom-0 left-0 right-0 border-t border-slate-200 bg-white px-5 pb-6 pt-4">
         <Pressable onPress={() => setQuickActionsExpanded((value) => !value)} className="flex-row items-center justify-between">

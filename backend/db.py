@@ -84,6 +84,23 @@ class Exercise(Base):
     workout_id: Mapped[int] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=False)
     workout: Mapped["Workout"] = relationship("Workout", back_populates="exercises")
 
+class PlannedWorkout(Base):
+    """A single day's workout instance derived from the regimen blueprint.
+
+    Created automatically after complete_workout with any LLM-suggested
+    short-term modifications applied. The regimen is never touched.
+    exercises_json holds the final exercise list for that day.
+    """
+    __tablename__ = "PlannedWorkouts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    regimen_id: Mapped[int] = mapped_column(Integer, ForeignKey("Regimens.id"), nullable=False, index=True)
+    day: Mapped[str] = mapped_column(String(20), nullable=False)
+    exercises_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class WorkoutLog(Base):
     """Append-only log entry created after each completed workout.
 

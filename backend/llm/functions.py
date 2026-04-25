@@ -1,5 +1,5 @@
 from .client import query
-from .constants import DAYS_OF_WEEK, EXERCISE_DB
+from .constants import DAYS_OF_WEEK, filter_exercises_by_muscles, get_exercise_muscles
 from .prompts import (
     build_complete_workout_messages,
     build_modify_messages,
@@ -46,7 +46,7 @@ async def create_regimen(onboarding: dict) -> dict:
     workouts_by_day = {}
     for i, day_plan in enumerate(workout_days, start=2):
         print(f"  [LLM call {i}] Expanding {day_plan.day} ({', '.join(day_plan.muscle_groups)})...")
-        dw = await expand_day(onboarding, weekly_plan, day_plan)
+        dw = _hydrate_day_workout(await expand_day(onboarding, weekly_plan, day_plan))
         workouts_by_day[dw.day] = [e.model_dump() for e in dw.exercises]
         print(f"  [LLM call {i}] Done — {len(dw.exercises)} exercises.")
 
@@ -58,12 +58,17 @@ async def create_regimen(onboarding: dict) -> dict:
 
 
 def _filter_exercises(muscle_groups: list[str]) -> list[str]:
-    """
-    Return exercises relevant to the given muscle groups.
-    Currently returns the full list; add a muscle_group → exercise mapping here
-    once the exercise DB is annotated.
-    """
-    return EXERCISE_DB
+    """Return the exercises tagged for the requested muscle groups."""
+    return filter_exercises_by_muscles(muscle_groups)
+
+
+def _hydrate_day_workout(day_workout: DayWorkout) -> DayWorkout:
+    """Backfill muscle coverage from constants so plans stay exercise-driven."""
+    exercises = [
+        ex.model_copy(update={"muscles_worked": get_exercise_muscles(ex.name, ex.muscles_worked)})
+        for ex in day_workout.exercises
+    ]
+    return day_workout.model_copy(update={"exercises": exercises})
 
 
 # ── Modify regimen ───────────────────────────────────────────────────────────

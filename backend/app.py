@@ -349,10 +349,14 @@ def _suggest_questions_from_context(context: dict[str, Any]) -> list[str]:
         "I only have 35 minutes today - how should I modify this session?",
     ]
     if latest_workouts:
-        muscles = latest_workouts[0].get("muscles_worked", [])
+        muscles = {
+            muscle.casefold()
+            for muscle in latest_workouts[0].get("muscles_worked", [])
+            if isinstance(muscle, str)
+        }
         if "quads" in muscles or "hamstrings" in muscles:
             base.insert(0, "How should I recover after my last leg day?")
-        if "chest" in muscles or "shoulders" in muscles:
+        if {"upper chest", "lower chest", "front delt", "side delt", "rear delt"} & muscles:
             base.insert(0, "How do I protect shoulders on pressing days?")
     return base[:8]
 
@@ -488,19 +492,50 @@ def _extract_json_object(raw_text: str) -> Optional[dict[str, Any]]:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _normalize_follow_up_questions(raw_follow_ups: list[str], context: dict[str, Any]) -> list[str]:
+    normalized: list[str] = []
+    blocked_fragments = [
+        "are you training",
+        "can you tell me your",
+        "what is your goal",
+        "how many days do you train",
+        "so i can better",
+    ]
+
+    for item in raw_follow_ups:
+        text = str(item).strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if any(fragment in lowered for fragment in blocked_fragments):
+            continue
+        if "?" not in text:
+            text = f"{text.rstrip('.')}?"
+        # Ensure suggestions read as user-to-coach prompts.
+        if lowered.startswith("are you ") or lowered.startswith("do you "):
+            text = f"How should I {text[7:].strip().rstrip('?')}?"
+        normalized.append(text)
+
+    if normalized:
+        return normalized[:3]
+    return _suggest_questions_from_context(context)[:3]
+
+
 def _compose_answer_with_claude(question: str, context: dict[str, Any], style: str) -> Optional[dict[str, Any]]:
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
         return None
 
-    model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-latest")
+    model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
     system_prompt = (
         "You are a fitness coaching assistant. Return ONLY a JSON object with keys: "
         "direct_answer (string), why (array of 1-3 strings), do_this_next (array of 2-4 strings), "
         "follow_ups (array of 3 strings), citations (array of 1-3 strings), safety_flags (array of strings), "
         "category (one of progression,recovery,exercise_swaps,technique,program_balance,nutrition,general). "
         "Keep advice practical, short, and grounded in provided context. "
-        "If injury/pain language appears, include safety flag 'possible_injury_language'."
+        "If injury/pain language appears, include safety flag 'possible_injury_language'. "
+        "IMPORTANT: follow_ups must be phrased as user questions to ask the coach, in first person where natural "
+        "(e.g., 'How should I...?', 'Can you help me...?'). Do not ask the user for intake details in follow_ups."
     )
 
     user_prompt = (
@@ -574,7 +609,7 @@ def _compose_answer_with_claude(question: str, context: dict[str, Any], style: s
         "direct_answer": str(answer["direct_answer"]),
         "why": [str(item) for item in answer["why"]][:3],
         "do_this_next": [str(item) for item in answer["do_this_next"]][:4],
-        "follow_ups": [str(item) for item in answer["follow_ups"]][:3],
+        "follow_ups": _normalize_follow_up_questions([str(item) for item in answer["follow_ups"]], context),
         "citations": [str(item) for item in answer["citations"]][:3],
         "safety_flags": [str(item) for item in answer["safety_flags"]][:3],
     }
@@ -590,7 +625,7 @@ def _generate_research_answer(question: str, context: dict[str, Any], style: str
     return llm_answer
 
 def _serialize_regimen(r: Regimen) -> dict[str, Any]:
-    plan = json.loads(r.plan_json) if r.plan_json else None
+    plan = _normalize_regimen_plan(json.loads(r.plan_json)) if r.plan_json else None
     return {
         "id": r.id,
         "user_id": r.user_id,
@@ -703,9 +738,7 @@ def log_workout(username: str):
     muscles_worked = payload.get("muscles_worked")
     exercises_payload = payload.get("exercises")
 
-    muscles_list = [str(x).strip() for x in _as_list(muscles_worked) if str(x).strip()]
-    if not muscles_list:
-        return {"error": "muscles_worked is required (string or list)"}, 400
+    muscles_list = _dedupe_muscles([str(x).strip() for x in _as_list(muscles_worked) if str(x).strip()])
 
     if not isinstance(exercises_payload, list) or len(exercises_payload) == 0:
         return {"error": "exercises must be a non-empty list"}, 400
@@ -715,7 +748,7 @@ def log_workout(username: str):
         if user is None:
             return {"error": "user not found"}, 404
 
-        workout = Workout(user_id=user.id, mood=mood, muscles_worked=", ".join(muscles_list))
+        normalized_exercises: list[dict[str, Any]] = []
 
         for idx, ex in enumerate(exercises_payload):
             if not isinstance(ex, dict):
@@ -726,7 +759,7 @@ def log_workout(username: str):
             weight = ex.get("weight")
             rest_time = ex.get("rest_time")
             ex_muscles = ex.get("muscles_worked", muscles_worked)
-            ex_muscles_list = [str(x).strip() for x in _as_list(ex_muscles) if str(x).strip()]
+            ex_muscles_list = _normalize_exercise_muscles(ex_muscles, name if isinstance(name, str) else None)
 
             if not isinstance(name, str) or not name.strip():
                 return {"error": f"exercises[{idx}].name is required"}, 400
@@ -741,14 +774,31 @@ def log_workout(username: str):
             if not ex_muscles_list:
                 return {"error": f"exercises[{idx}].muscles_worked is required"}, 400
 
+            normalized_exercises.append(
+                {
+                    "name": name.strip(),
+                    "sets": sets,
+                    "reps": reps,
+                    "weight": float(weight),
+                    "rest_time": rest_time,
+                    "muscles_worked": ex_muscles_list,
+                }
+            )
+
+        workout_muscles = _aggregate_workout_muscles(normalized_exercises) or muscles_list
+        if not workout_muscles:
+            return {"error": "muscles_worked is required (string or list)"}, 400
+
+        workout = Workout(user_id=user.id, mood=mood, muscles_worked=", ".join(workout_muscles))
+        for exercise in normalized_exercises:
             workout.exercises.append(
                 Exercise(
-                    name=name.strip(),
-                    sets=sets,
-                    reps=reps,
-                    weight=float(weight),
-                    rest_time=rest_time,
-                    muscles_worked=", ".join(ex_muscles_list),
+                    name=exercise["name"],
+                    sets=exercise["sets"],
+                    reps=exercise["reps"],
+                    weight=exercise["weight"],
+                    rest_time=exercise["rest_time"],
+                    muscles_worked=", ".join(exercise["muscles_worked"]),
                 )
             )
 
@@ -988,7 +1038,7 @@ def create_regimen(username: str):
             flush=True,
         )
         try:
-            plan = asyncio.run(llm_create_regimen(onboarding))
+            plan = _normalize_regimen_plan(asyncio.run(llm_create_regimen(onboarding)))
         except Exception as exc:
             print(f"[LLM TEST] create_regimen failed for username={username!r}: {exc}", flush=True)
             return {"error": f"LLM call failed: {exc}"}, 502
@@ -1170,7 +1220,7 @@ def modify_regimen(username: str, regimen_id: int):
         if not regimen.plan_json:
             return {"error": "regimen has no plan"}, 400
 
-        plan = json.loads(regimen.plan_json)
+        plan = _normalize_regimen_plan(json.loads(regimen.plan_json))
         onboarding = plan.get("onboarding", {})
 
         print(
@@ -1187,7 +1237,7 @@ def modify_regimen(username: str, regimen_id: int):
             return {"error": f"LLM call failed: {exc}"}, 502
 
         try:
-            updated_plan = jsonpatch.apply_patch(plan, result["patches"])
+            updated_plan = _normalize_regimen_plan(jsonpatch.apply_patch(plan, result["patches"]))
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
             print(
                 f"[LLM] modify_regimen patch failed for username={username!r}; regimen_id={regimen_id}; patches={result['patches']}: {exc}",
@@ -1239,10 +1289,10 @@ def apply_patches(username: str, regimen_id: int):
         if not regimen.plan_json:
             return {"error": "regimen has no plan"}, 400
 
-        plan = json.loads(regimen.plan_json)
+        plan = _normalize_regimen_plan(json.loads(regimen.plan_json))
 
         try:
-            updated_plan = jsonpatch.apply_patch(plan, patches)
+            updated_plan = _normalize_regimen_plan(jsonpatch.apply_patch(plan, patches))
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
             return {"error": f"patch application failed: {exc}"}, 422
 

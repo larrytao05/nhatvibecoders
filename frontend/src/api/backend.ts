@@ -22,6 +22,8 @@ interface ApiErrorBody {
   error?: string;
 }
 
+type MuscleCoverage = string | string[] | null | undefined;
+
 interface WorkoutListResponse {
   username: string;
   workouts: BackendWorkoutResponse[];
@@ -42,9 +44,11 @@ type BackendUserResponse = Partial<BackendUser> & {
 
 type BackendExerciseResponse = Omit<Exercise, "workout_id"> & {
   workout_id?: number;
+  muscles_worked?: MuscleCoverage;
 };
 
-type BackendWorkoutResponse = Omit<Workout, "exercises"> & {
+type BackendWorkoutResponse = Omit<Workout, "exercises" | "muscles_worked"> & {
+  muscles_worked?: MuscleCoverage;
   exercises: BackendExerciseResponse[];
 };
 
@@ -63,7 +67,7 @@ interface LlmRegimenPlan {
       reps: number;
       weight: number;
       rest_time: number;
-      muscles_worked?: string;
+      muscles_worked?: MuscleCoverage;
       notes?: string;
     }>
   >;
@@ -131,13 +135,51 @@ function normalizeUser(user: BackendUserResponse, profile?: OnboardingProfile): 
   };
 }
 
+function parseMusclesWorked(value: MuscleCoverage): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function dedupeMusclesWorked(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function formatMusclesWorked(value: MuscleCoverage): string {
+  return dedupeMusclesWorked(parseMusclesWorked(value)).join(", ");
+}
+
+function aggregateMusclesWorked(values: MuscleCoverage[]): string[] {
+  return dedupeMusclesWorked(values.flatMap((value) => parseMusclesWorked(value)));
+}
+
 function normalizeWorkout(workout: BackendWorkoutResponse): Workout {
+  const exercises = workout.exercises.map((exercise) => ({
+    ...exercise,
+    workout_id: exercise.workout_id ?? workout.id,
+    muscles_worked: formatMusclesWorked(exercise.muscles_worked ?? workout.muscles_worked),
+  }));
+  const workoutMuscles = aggregateMusclesWorked(exercises.map((exercise) => exercise.muscles_worked));
+
   return {
     ...workout,
-    exercises: workout.exercises.map((exercise) => ({
-      ...exercise,
-      workout_id: exercise.workout_id ?? workout.id,
-    })),
+    muscles_worked: workoutMuscles.length > 0 ? workoutMuscles.join(", ") : formatMusclesWorked(workout.muscles_worked),
+    exercises,
   };
 }
 
@@ -175,27 +217,31 @@ function normalizeRegimen(response: BackendRegimenResponse, scheduledWorkoutResp
   const plannedWorkouts: Workout[] = [];
   const days: RegimenDay[] = (llmPlan.schedule ?? []).map((dayPlan, index) => {
     const exercises = llmPlan.workouts?.[dayPlan.day] ?? [];
-    const scheduledWorkout = scheduledWorkoutsByDay.get(dayPlan.day);
-    const workoutId = scheduledWorkout?.id ?? (dayPlan.muscle_groups.length > 0 ? -(index + 1) : null);
+    const workoutId = exercises.length > 0 ? -(index + 1) : null;
+    const normalizedExercises = exercises.map((exercise, exerciseIndex) => ({
+      id: workoutId !== null ? workoutId * 100 - exerciseIndex : -(exerciseIndex + 1),
+      workout_id: workoutId ?? -(index + 1),
+      name: exercise.name,
+      sets: exercise.sets,
+      reps: exercise.reps,
+      weight: exercise.weight,
+      rest_time: exercise.rest_time,
+      muscles_worked: formatMusclesWorked(exercise.muscles_worked),
+    }));
+    const workoutMuscles = aggregateMusclesWorked(
+      normalizedExercises.map((exercise) => exercise.muscles_worked),
+    );
+    const focusMuscles = workoutMuscles.length > 0 ? workoutMuscles : dayPlan.muscle_groups;
 
     if (!scheduledWorkout && workoutId !== null && exercises.length > 0) {
       plannedWorkouts.push({
         id: workoutId,
         user_id: response.user_id,
         mood: null,
-        muscles_worked: dayPlan.muscle_groups.join(", "),
+        muscles_worked: focusMuscles.join(", "),
         created_at: now,
         updated_at: now,
-        exercises: exercises.map((exercise, exerciseIndex) => ({
-          id: workoutId * 100 - exerciseIndex,
-          workout_id: workoutId,
-          name: exercise.name,
-          sets: exercise.sets,
-          reps: exercise.reps,
-          weight: exercise.weight,
-          rest_time: exercise.rest_time,
-          muscles_worked: exercise.muscles_worked ?? dayPlan.muscle_groups.join(", "),
-        })),
+        exercises: normalizedExercises,
       });
     }
 
@@ -203,8 +249,8 @@ function normalizeRegimen(response: BackendRegimenResponse, scheduledWorkoutResp
       id: `day-${index + 1}`,
       day_index: index + 1,
       title: dayPlan.day,
-      focus: dayPlan.muscle_groups.length > 0 ? dayPlan.muscle_groups.join(", ") : "Recovery",
-      intensity: dayPlan.muscle_groups.length > 2 ? "High" : dayPlan.muscle_groups.length > 0 ? "Medium" : "Low",
+      focus: focusMuscles.length > 0 ? focusMuscles.join(", ") : "Recovery",
+      intensity: focusMuscles.length > 2 ? "High" : focusMuscles.length > 0 ? "Medium" : "Low",
       workout_id: workoutId,
       notes: dayPlan.reasoning,
     };
@@ -283,19 +329,21 @@ export async function getLatestRegimen(username: string): Promise<RegimenWithWor
 }
 
 export async function logWorkout(username: string, workout: Workout, logs: Record<number, ExerciseLog>): Promise<Workout> {
+  const exercises = workout.exercises.map((exercise) => ({
+    name: exercise.name,
+    sets: exercise.sets,
+    reps: Number(logs[exercise.id]?.actualReps ?? exercise.reps),
+    weight: Number(logs[exercise.id]?.actualWeight ?? exercise.weight),
+    rest_time: exercise.rest_time,
+    muscles_worked: exercise.muscles_worked,
+  }));
+  const musclesWorked = aggregateMusclesWorked(exercises.map((exercise) => exercise.muscles_worked)).join(", ");
   const created = await requestJson<BackendWorkoutResponse>(`/users/${encodeURIComponent(username)}/workouts`, {
     method: "POST",
     body: JSON.stringify({
       mood: workout.mood ?? "completed",
-      muscles_worked: workout.muscles_worked,
-      exercises: workout.exercises.map((exercise) => ({
-        name: exercise.name,
-        sets: exercise.sets,
-        reps: Number(logs[exercise.id]?.actualReps ?? exercise.reps),
-        weight: Number(logs[exercise.id]?.actualWeight ?? exercise.weight),
-        rest_time: exercise.rest_time,
-        muscles_worked: exercise.muscles_worked,
-      })),
+      muscles_worked: musclesWorked || workout.muscles_worked,
+      exercises,
     }),
   });
 
