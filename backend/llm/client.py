@@ -7,7 +7,7 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 _client = anthropic.AsyncAnthropic()
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-haiku-4-5-20251001"
 MAX_RETRIES = 3
 
 
