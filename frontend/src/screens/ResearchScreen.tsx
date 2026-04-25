@@ -20,7 +20,7 @@ interface HistoryItem {
 }
 
 export function ResearchScreen() {
-  const { user } = useWorkoutPlanner();
+  const { user, refreshPlannerData } = useWorkoutPlanner();
   const [question, setQuestion] = useState("");
   const [lastAsked, setLastAsked] = useState("");
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
@@ -117,6 +117,10 @@ export function ResearchScreen() {
       await askQuestion(question);
       return;
     }
+    if (action === "apply_to_next_workout" && !lastAsked.trim() && !answer?.direct_answer?.trim()) {
+      setStatusMessage("Ask a question first so coach guidance can be applied to your workout.");
+      return;
+    }
     setLoading(true);
     setStatusMessage("");
     try {
@@ -129,6 +133,9 @@ export function ResearchScreen() {
           answer_snapshot: answer?.direct_answer ?? "",
         }),
       });
+      if (action === "apply_to_next_workout") {
+        await refreshPlannerData();
+      }
       setStatusMessage(payload.message);
     } catch (error) {
       setStatusMessage(`Action failed: ${String(error)}`);
@@ -284,9 +291,14 @@ export function ResearchScreen() {
           </Pressable>
         </View>
         {regenerateExpanded ? (
-          <Pressable onPress={() => runAction("regenerate")} className="mt-3 rounded-2xl bg-brand px-3 py-3">
-            <Text className="text-center text-base font-black text-white">Regenerate</Text>
-          </Pressable>
+          <View className="mt-3 flex-row gap-2">
+            <Pressable onPress={() => runAction("apply_to_next_workout")} className="flex-1 rounded-2xl bg-slate-900 px-3 py-3">
+              <Text className="text-center text-base font-black text-white">Apply</Text>
+            </Pressable>
+            <Pressable onPress={() => runAction("regenerate")} className="flex-1 rounded-2xl bg-brand px-3 py-3">
+              <Text className="text-center text-base font-black text-white">Regenerate</Text>
+            </Pressable>
+          </View>
         ) : null}
       </View>
 

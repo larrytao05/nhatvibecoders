@@ -3,6 +3,7 @@ import {
   createUser,
   createRegimen,
   DEFAULT_USERNAME,
+  getLatestRegimen,
   getUser,
   getUserWorkouts,
   logWorkout,
@@ -38,6 +39,7 @@ interface WorkoutPlannerContextValue {
   updateExerciseLog: (exerciseId: number, updates: Partial<ExerciseLog>) => void;
   completeWorkout: () => Promise<void>;
   tweakPlanWithFeedback: (feedback: string) => Promise<void>;
+  refreshPlannerData: () => Promise<void>;
 }
 
 const defaultOnboarding: OnboardingProfile = {
@@ -257,6 +259,25 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     setIsAiProcessing(false);
   };
 
+  const refreshPlannerData = async () => {
+    const username = user?.username ?? DEFAULT_USERNAME;
+    const [apiWorkouts, latestRegimen] = await Promise.all([
+      getUserWorkouts(username).catch(() => []),
+      getLatestRegimen(username).catch(() => null),
+    ]);
+
+    if (apiWorkouts.length > 0) {
+      setWorkouts(apiWorkouts);
+    }
+    if (latestRegimen) {
+      setRegimen(latestRegimen.regimen);
+      setWorkouts((previous) => [
+        ...latestRegimen.plannedWorkouts,
+        ...previous.filter((workout) => workout.id > 0 && !latestRegimen.plannedWorkouts.some((planned) => planned.id === workout.id)),
+      ]);
+    }
+  };
+
   return (
     <WorkoutPlannerContext.Provider
       value={{
@@ -285,6 +306,7 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
         updateExerciseLog,
         completeWorkout,
         tweakPlanWithFeedback,
+        refreshPlannerData,
       }}
     >
       {children}

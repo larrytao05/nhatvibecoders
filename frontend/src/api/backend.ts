@@ -274,6 +274,11 @@ export async function requestRegimenTweak(username: string, regimenId: number, f
   return normalizeRegimen(updated);
 }
 
+export async function getLatestRegimen(username: string): Promise<RegimenWithWorkouts> {
+  const response = await requestJson<BackendRegimenResponse>(`/users/${encodeURIComponent(username)}/regimens/latest`);
+  return normalizeRegimen(response);
+}
+
 export async function requestWorkoutCompletion(
   username: string,
   workoutId: number,
