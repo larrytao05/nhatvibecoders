@@ -1,7 +1,9 @@
 import asyncio
+import os
 from typing import Type, TypeVar
 
 import anthropic
+from dotenv import load_dotenv
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)

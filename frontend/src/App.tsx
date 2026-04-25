@@ -8,11 +8,13 @@ import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AiProcessingOverlay } from "./components/AiProcessingOverlay";
 import { MainTabParamList, OnboardingStackParamList } from "./navigation/types";
+import { AuthScreen } from "./screens/AuthScreen";
 import { BiometricsScreen } from "./screens/BiometricsScreen";
 import { GoalsScreen } from "./screens/GoalsScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { LogisticsScreen } from "./screens/LogisticsScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
+import { ResearchScreen } from "./screens/ResearchScreen";
 import { WorkoutsScreen } from "./screens/WorkoutsScreen";
 import { useWorkoutPlanner, WorkoutPlannerProvider } from "./state/WorkoutPlannerContext";
 
@@ -56,6 +58,11 @@ function MainNavigator() {
         options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="WO" /> }}
       />
       <MainTabs.Screen
+        name="Research"
+        component={ResearchScreen}
+        options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="AI" /> }}
+      />
+      <MainTabs.Screen
         name="Profile"
         component={ProfileScreen}
         options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="ME" /> }}
@@ -65,11 +72,13 @@ function MainNavigator() {
 }
 
 function RootNavigator() {
-  const { onboardingComplete, isAiProcessing } = useWorkoutPlanner();
+  const { authComplete, onboardingComplete, isAiProcessing } = useWorkoutPlanner();
 
   return (
     <>
-      <NavigationContainer>{onboardingComplete ? <MainNavigator /> : <OnboardingNavigator />}</NavigationContainer>
+      <NavigationContainer>
+        {!authComplete ? <AuthScreen /> : onboardingComplete ? <MainNavigator /> : <OnboardingNavigator />}
+      </NavigationContainer>
       <AiProcessingOverlay visible={isAiProcessing} />
     </>
   );
