@@ -92,17 +92,11 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const selectedDay = useMemo(() => {
-    return regimen?.plan.days.find((day) => day.id === selectedDayId) ?? regimen?.plan.days[0] ?? null;
-  }, [regimen, selectedDayId]);
+  const selectedDay = regimen?.plan.days.find((day) => day.id === selectedDayId) ?? regimen?.plan.days[0] ?? null;
 
-  const currentWorkout = useMemo(() => {
-    if (!selectedDay?.workout_id) {
-      return null;
-    }
-
-    return workouts.find((workout) => workout.id === selectedDay.workout_id) ?? null;
-  }, [selectedDay, workouts]);
+  const currentWorkout = selectedDay?.workout_id
+    ? workouts.find((workout) => workout.id === selectedDay.workout_id) ?? null
+    : null;
 
   useEffect(() => {
     if (!currentWorkout) {
@@ -125,14 +119,13 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     });
   }, [currentWorkout]);
 
-  const completionRatio = useMemo(() => {
+  const completionRatio = (() => {
     if (!currentWorkout || currentWorkout.exercises.length === 0) {
       return 0;
     }
-
     const completed = currentWorkout.exercises.filter((exercise) => exerciseLogs[exercise.id]?.complete).length;
     return completed / currentWorkout.exercises.length;
-  }, [currentWorkout, exerciseLogs]);
+  })();
 
   const setBiometricField: WorkoutPlannerContextValue["setBiometricField"] = (field, value) => {
     setOnboarding((previous) => ({ ...previous, [field]: value }));
