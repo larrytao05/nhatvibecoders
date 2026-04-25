@@ -9,7 +9,7 @@ export function AiProcessingOverlay({ visible }: { visible: boolean }) {
           <ActivityIndicator color="#2563eb" size="large" />
           <Text className="mt-4 text-center text-xl font-black text-ink">AI Processing...</Text>
           <Text className="mt-2 text-center text-sm leading-5 text-muted">
-            Sending profile, current JSON, and feedback through the HTP planning loop.
+            Generating personalized workout plan...
           </Text>
         </View>
       </View>
