@@ -633,6 +633,44 @@ def _infer_focus_from_text(question: str, answer_snapshot: str) -> Optional[str]
     return None
 
 
+def _exercise_templates_for_focus(focus: str) -> list[dict[str, Any]]:
+    templates: dict[str, list[dict[str, Any]]] = {
+        "Legs": [
+            {"name": "Back Squat", "sets": 4, "reps": 6, "weight": 0, "rest_time": 150, "muscles_worked": "Legs"},
+            {"name": "Romanian Deadlift", "sets": 3, "reps": 8, "weight": 0, "rest_time": 120, "muscles_worked": "Legs"},
+            {"name": "Walking Lunge", "sets": 3, "reps": 10, "weight": 0, "rest_time": 90, "muscles_worked": "Legs"},
+        ],
+        "Back + Biceps": [
+            {"name": "Barbell Row", "sets": 4, "reps": 8, "weight": 0, "rest_time": 120, "muscles_worked": "Back, Biceps"},
+            {"name": "Lat Pulldown", "sets": 3, "reps": 10, "weight": 0, "rest_time": 90, "muscles_worked": "Back, Biceps"},
+            {"name": "Dumbbell Curl", "sets": 3, "reps": 12, "weight": 0, "rest_time": 75, "muscles_worked": "Biceps"},
+        ],
+        "Chest + Triceps": [
+            {"name": "Barbell Bench Press", "sets": 4, "reps": 6, "weight": 0, "rest_time": 150, "muscles_worked": "Chest, Triceps"},
+            {"name": "Incline Dumbbell Press", "sets": 3, "reps": 10, "weight": 0, "rest_time": 90, "muscles_worked": "Chest, Shoulders"},
+            {"name": "Cable Triceps Pressdown", "sets": 3, "reps": 12, "weight": 0, "rest_time": 75, "muscles_worked": "Triceps"},
+        ],
+        "Shoulders + Core": [
+            {"name": "Seated Dumbbell Press", "sets": 4, "reps": 8, "weight": 0, "rest_time": 120, "muscles_worked": "Shoulders"},
+            {"name": "Lateral Raise", "sets": 3, "reps": 12, "weight": 0, "rest_time": 75, "muscles_worked": "Shoulders"},
+            {"name": "Weighted Plank", "sets": 3, "reps": 1, "weight": 0, "rest_time": 60, "muscles_worked": "Core"},
+        ],
+        "Recovery": [
+            {"name": "Mobility Flow", "sets": 2, "reps": 1, "weight": 0, "rest_time": 45, "muscles_worked": "Recovery"},
+            {"name": "Easy Bike", "sets": 1, "reps": 20, "weight": 0, "rest_time": 30, "muscles_worked": "Recovery"},
+        ],
+        "Full Body": [
+            {"name": "Trap Bar Deadlift", "sets": 4, "reps": 5, "weight": 0, "rest_time": 150, "muscles_worked": "Full Body"},
+            {"name": "Pull-Up", "sets": 3, "reps": 8, "weight": 0, "rest_time": 90, "muscles_worked": "Back, Arms"},
+            {"name": "Dumbbell Bench Press", "sets": 3, "reps": 10, "weight": 0, "rest_time": 90, "muscles_worked": "Chest, Shoulders"},
+        ],
+    }
+    return templates.get(
+        focus,
+        [{"name": "Coach Prescribed Lift", "sets": 3, "reps": 8, "weight": 0, "rest_time": 90, "muscles_worked": focus}],
+    )
+
+
 def _compose_answer_with_claude(question: str, context: dict[str, Any], style: str) -> Optional[dict[str, Any]]:
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
@@ -1374,6 +1412,24 @@ def modify_regimen(username: str, regimen_id: int):
         return response_payload
 
 
+@app.get("/users/<username>/regimens/latest")
+def get_latest_regimen(username: str):
+    with get_session() as session:
+        user = session.query(User).filter_by(username=username).first()
+        if user is None:
+            return {"error": "user not found"}, 404
+
+        regimen = (
+            session.query(Regimen)
+            .filter_by(user_id=user.id)
+            .order_by(Regimen.updated_at.desc())
+            .first()
+        )
+        if regimen is None:
+            return {"error": "regimen not found"}, 404
+        return _serialize_regimen(regimen)
+
+
 @app.post("/users/<username>/regimens/<int:regimen_id>/apply-patches")
 def apply_patches(username: str, regimen_id: int):
     """
@@ -1505,8 +1561,50 @@ def research_actions(username: str):
                 mood="planned_from_research",
                 muscles_worked=focus,
             )
+            for exercise in _exercise_templates_for_focus(focus):
+                planned_workout.exercises.append(
+                    Exercise(
+                        name=str(exercise["name"]),
+                        sets=int(exercise["sets"]),
+                        reps=int(exercise["reps"]),
+                        weight=float(exercise["weight"]),
+                        rest_time=int(exercise["rest_time"]),
+                        muscles_worked=str(exercise["muscles_worked"]),
+                    )
+                )
             session.add(planned_workout)
             session.flush()
+
+            target_day: Optional[str] = None
+            regimen = (
+                session.query(Regimen)
+                .filter_by(user_id=user.id)
+                .order_by(Regimen.updated_at.desc())
+                .first()
+            )
+            if regimen and regimen.plan_json:
+                plan = _safe_json_loads(regimen.plan_json) or {}
+                schedule = plan.get("schedule")
+                if isinstance(schedule, list) and schedule:
+                    target_index = 0
+                    for idx, day in enumerate(schedule):
+                        if isinstance(day, dict) and day.get("workout_id"):
+                            target_index = idx
+                            break
+                    selected = schedule[target_index]
+                    if isinstance(selected, dict):
+                        selected["workout_id"] = planned_workout.id
+                        selected["muscle_groups"] = [focus]
+                        selected["reasoning"] = f"Applied from research recommendation: {focus}"
+                        target_day = str(selected.get("day") or "")
+
+                        workouts_blob = plan.get("workouts")
+                        if not isinstance(workouts_blob, dict):
+                            workouts_blob = {}
+                            plan["workouts"] = workouts_blob
+                        day_key = target_day or f"Day {target_index + 1}"
+                        workouts_blob[day_key] = _exercise_templates_for_focus(focus)
+                        regimen.plan_json = json.dumps(plan)
 
             note = f"Applied research guidance and created workout #{planned_workout.id} focused on {focus}."
             user.log = f"{(user.log or '').strip()}\n{note}".strip()
@@ -1515,6 +1613,7 @@ def research_actions(username: str):
                 "ok": True,
                 "message": note,
                 "applied_workout": _serialize_workout(planned_workout),
+                "applied_day": target_day,
             }
 
         if action == "save_as_note":
