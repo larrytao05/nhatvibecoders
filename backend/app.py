@@ -259,4 +259,4 @@ def complete_workout(username: str):
     return {"ok": True}, 200
 if __name__ == "__main__":
     init_db()
-    app.run(debug=bool(int(os.getenv("FLASK_DEBUG", "1"))))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=bool(int(os.getenv("FLASK_DEBUG", "1"))))

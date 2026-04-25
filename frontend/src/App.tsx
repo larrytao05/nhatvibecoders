@@ -8,6 +8,7 @@ import { Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AiProcessingOverlay } from "./components/AiProcessingOverlay";
 import { MainTabParamList, OnboardingStackParamList } from "./navigation/types";
+import { AuthScreen } from "./screens/AuthScreen";
 import { BiometricsScreen } from "./screens/BiometricsScreen";
 import { GoalsScreen } from "./screens/GoalsScreen";
 import { HomeScreen } from "./screens/HomeScreen";
@@ -65,11 +66,13 @@ function MainNavigator() {
 }
 
 function RootNavigator() {
-  const { onboardingComplete, isAiProcessing } = useWorkoutPlanner();
+  const { authComplete, onboardingComplete, isAiProcessing } = useWorkoutPlanner();
 
   return (
     <>
-      <NavigationContainer>{onboardingComplete ? <MainNavigator /> : <OnboardingNavigator />}</NavigationContainer>
+      <NavigationContainer>
+        {!authComplete ? <AuthScreen /> : onboardingComplete ? <MainNavigator /> : <OnboardingNavigator />}
+      </NavigationContainer>
       <AiProcessingOverlay visible={isAiProcessing} />
     </>
   );

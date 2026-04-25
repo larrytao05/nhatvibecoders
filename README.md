@@ -27,6 +27,26 @@ cd frontend
 npm start
 ```
 
+Connect the frontend to the local Flask API:
+
+```bash
+cd frontend
+EXPO_PUBLIC_API_URL=http://127.0.0.1:5000 npm start
+```
+
+If you are using Expo Go on a physical phone, replace `127.0.0.1` with your computer's LAN IP address, for example:
+
+```bash
+cd frontend
+EXPO_PUBLIC_API_URL=http://192.168.1.25:5000 npm start
+```
+
+The first frontend screen is username-only auth:
+
+- **Log in** calls `GET /users/<username>`.
+- **Sign up** calls `POST /users`.
+- If a signup username already exists, switch to **Log in**.
+
 Useful Expo commands:
 
 ```bash
@@ -100,5 +120,5 @@ python app.py
 ```bash
 cd frontend
 npm install
-npm start
+EXPO_PUBLIC_API_URL=http://127.0.0.1:5000 npm start
 ```
