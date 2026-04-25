@@ -354,6 +354,35 @@ def _extract_json_object(raw_text: str) -> Optional[dict[str, Any]]:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _normalize_follow_up_questions(raw_follow_ups: list[str], context: dict[str, Any]) -> list[str]:
+    normalized: list[str] = []
+    blocked_fragments = [
+        "are you training",
+        "can you tell me your",
+        "what is your goal",
+        "how many days do you train",
+        "so i can better",
+    ]
+
+    for item in raw_follow_ups:
+        text = str(item).strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if any(fragment in lowered for fragment in blocked_fragments):
+            continue
+        if "?" not in text:
+            text = f"{text.rstrip('.')}?"
+        # Ensure suggestions read as user-to-coach prompts.
+        if lowered.startswith("are you ") or lowered.startswith("do you "):
+            text = f"How should I {text[7:].strip().rstrip('?')}?"
+        normalized.append(text)
+
+    if normalized:
+        return normalized[:3]
+    return _suggest_questions_from_context(context)[:3]
+
+
 def _compose_answer_with_claude(question: str, context: dict[str, Any], style: str) -> Optional[dict[str, Any]]:
     api_key = os.getenv("CLAUDE_API_KEY")
     if not api_key:
@@ -366,7 +395,9 @@ def _compose_answer_with_claude(question: str, context: dict[str, Any], style: s
         "follow_ups (array of 3 strings), citations (array of 1-3 strings), safety_flags (array of strings), "
         "category (one of progression,recovery,exercise_swaps,technique,program_balance,nutrition,general). "
         "Keep advice practical, short, and grounded in provided context. "
-        "If injury/pain language appears, include safety flag 'possible_injury_language'."
+        "If injury/pain language appears, include safety flag 'possible_injury_language'. "
+        "IMPORTANT: follow_ups must be phrased as user questions to ask the coach, in first person where natural "
+        "(e.g., 'How should I...?', 'Can you help me...?'). Do not ask the user for intake details in follow_ups."
     )
 
     user_prompt = (
@@ -440,7 +471,7 @@ def _compose_answer_with_claude(question: str, context: dict[str, Any], style: s
         "direct_answer": str(answer["direct_answer"]),
         "why": [str(item) for item in answer["why"]][:3],
         "do_this_next": [str(item) for item in answer["do_this_next"]][:4],
-        "follow_ups": [str(item) for item in answer["follow_ups"]][:3],
+        "follow_ups": _normalize_follow_up_questions([str(item) for item in answer["follow_ups"]], context),
         "citations": [str(item) for item in answer["citations"]][:3],
         "safety_flags": [str(item) for item in answer["safety_flags"]][:3],
     }
