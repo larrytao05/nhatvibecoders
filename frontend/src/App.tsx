@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
 import React from "react";
-import { Text } from "react-native";
+import { Image, ImageSourcePropType } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AiProcessingOverlay } from "./components/AiProcessingOverlay";
 import { MainTabParamList, OnboardingStackParamList } from "./navigation/types";
@@ -20,6 +20,12 @@ import { useWorkoutPlanner, WorkoutPlannerProvider } from "./state/WorkoutPlanne
 
 const OnboardingStack = createNativeStackNavigator<OnboardingStackParamList>();
 const MainTabs = createBottomTabNavigator<MainTabParamList>();
+const tabIcons = {
+  Home: require("../assets/home.png") as ImageSourcePropType,
+  Workouts: require("../assets/dumbell.png") as ImageSourcePropType,
+  Research: require("../assets/loupe.png") as ImageSourcePropType,
+  Profile: require("../assets/user.png") as ImageSourcePropType,
+};
 
 function OnboardingNavigator() {
   return (
@@ -31,13 +37,26 @@ function OnboardingNavigator() {
   );
 }
 
-function TabGlyph({ label, focused }: { label: string; focused: boolean }) {
-  return <Text className={`text-xs font-black ${focused ? "text-brand" : "text-slate-400"}`}>{label}</Text>;
+function TabIcon({ source, focused }: { source: ImageSourcePropType; focused: boolean }) {
+  return (
+    <Image
+      source={source}
+      resizeMode="contain"
+      style={{
+        height: 24,
+        tintColor: focused ? "#2563eb" : "#94a3b8",
+        width: 24,
+      }}
+    />
+  );
 }
 
 function MainNavigator() {
+  const { initialMainTab } = useWorkoutPlanner();
+
   return (
     <MainTabs.Navigator
+      initialRouteName={initialMainTab}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: "#2563eb",
@@ -51,21 +70,25 @@ function MainNavigator() {
         },
       }}
     >
-      <MainTabs.Screen name="Home" component={HomeScreen} options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="HM" /> }} />
+      <MainTabs.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} source={tabIcons.Home} /> }}
+      />
       <MainTabs.Screen
         name="Workouts"
         component={WorkoutsScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="WO" /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} source={tabIcons.Workouts} /> }}
       />
       <MainTabs.Screen
         name="Research"
         component={ResearchScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="AI" /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} source={tabIcons.Research} /> }}
       />
       <MainTabs.Screen
         name="Profile"
         component={ProfileScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabGlyph focused={focused} label="ME" /> }}
+        options={{ tabBarIcon: ({ focused }) => <TabIcon focused={focused} source={tabIcons.Profile} /> }}
       />
     </MainTabs.Navigator>
   );

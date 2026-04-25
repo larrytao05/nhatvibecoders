@@ -8,9 +8,10 @@ import { useWorkoutPlanner } from "../state/WorkoutPlannerContext";
 
 export function HomeScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList, "Home">>();
-  const { regimen, selectedDay, currentWorkout, completionRatio, onboarding } = useWorkoutPlanner();
+  const { regimen, selectedDay, currentWorkout, completionRatio, onboarding, expandingDayIds } = useWorkoutPlanner();
   const workoutDone = currentWorkout ? completionRatio === 1 : false;
   const weeklyTrainingDays = regimen?.plan.days.filter((day) => day.workout_id).length ?? onboarding.frequency;
+  const selectedDayExpanding = Boolean(selectedDay?.workout_id && !currentWorkout) || Boolean(selectedDay && expandingDayIds.includes(selectedDay.id));
 
   return (
     <ScrollView className="flex-1 bg-surface" contentContainerClassName="px-5 pb-28 pt-14">
@@ -35,7 +36,7 @@ export function HomeScreen() {
           </View>
           <View className={`rounded-full px-3 py-2 ${workoutDone ? "bg-emerald-50" : "bg-blue-50"}`}>
             <Text className={`text-xs font-black ${workoutDone ? "text-emerald-600" : "text-brand"}`}>
-              {workoutDone ? "DONE" : "READY"}
+              {workoutDone ? "DONE" : selectedDayExpanding ? "BUILDING" : "READY"}
             </Text>
           </View>
         </View>
@@ -49,6 +50,10 @@ export function HomeScreen() {
                 : `${currentWorkout.exercises.length} exercises planned. Start when you are ready.`}
             </Text>
           </View>
+        ) : selectedDayExpanding ? (
+          <Text className="mt-4 text-sm font-semibold text-slate-600">
+            Skeleton ready. The exercise list is being generated and will appear automatically.
+          </Text>
         ) : (
           <Text className="mt-4 text-sm font-semibold text-slate-600">{selectedDay?.notes ?? "Rest, recover, and keep your steps easy."}</Text>
         )}
