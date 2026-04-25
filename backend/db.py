@@ -18,13 +18,41 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, nullable=True)
     current_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
-
+    height: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_bf: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    workouts: Mapped[list["Workout"]] = relationship("Workout", back_populates="user")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
     )
 
+class Workout(Base):
+    __tablename__ = "Workouts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    user: Mapped["User"] = relationship("User", back_populates="workouts")
+    exercises: Mapped[list["Exercise"]] = relationship("Exercise", back_populates="workout")
+    mood: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+class Exercise(Base):
+    __tablename__ = "Exercises"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    sets: Mapped[int] = mapped_column(Integer, nullable=False)
+    reps: Mapped[int] = mapped_column(Integer, nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
+    rest_time: Mapped[int] = mapped_column(Integer, nullable=False)
+    workout_id: Mapped[int] = mapped_column(Integer, ForeignKey("Workouts.id"), nullable=False)
+    workout: Mapped["Workout"] = relationship("Workout", back_populates="exercises")
 
 def get_database_url() -> str:
     url = os.getenv("DATABASE_URL")

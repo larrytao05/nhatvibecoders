@@ -47,6 +47,10 @@ source .venv/bin/activate
 python app.py
 ```
 
+## Database spec
+
+See `DATABASE_SPEC.md`.
+
 ## API
 
 - `POST /users` body: `{ "username": "larry", "current_weight": 180.5 }`
