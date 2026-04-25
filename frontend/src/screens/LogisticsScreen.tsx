@@ -65,7 +65,7 @@ export function LogisticsScreen() {
         </View>
 
         <Pressable onPress={generateRegimenFromText} className="mt-6 rounded-2xl bg-ink px-5 py-4">
-          <Text className="text-center text-lg font-black text-white">Generate HTP Regimen</Text>
+          <Text className="text-center text-lg font-black text-white">Generate Workout Plan</Text>
         </Pressable>
         {generationError ? (
           <Text className="mt-3 text-center text-sm font-semibold leading-5 text-red-600">{generationError}</Text>

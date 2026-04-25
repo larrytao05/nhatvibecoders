@@ -218,7 +218,6 @@ function normalizeRegimen(response: BackendRegimenResponse, scheduledWorkoutResp
   const days: RegimenDay[] = (llmPlan.schedule ?? []).map((dayPlan, index) => {
     const scheduledWorkout = scheduledWorkoutsByDay.get(dayPlan.day);
     const exercises = llmPlan.workouts?.[dayPlan.day] ?? [];
-    const scheduledWorkout = scheduledWorkoutsByDay.get(dayPlan.day);
     const hasTrainingFocus = dayPlan.muscle_groups.length > 0;
     const workoutId = scheduledWorkout?.id ?? (hasTrainingFocus || exercises.length > 0 ? -(index + 1) : null);
     const normalizedExercises = exercises.map((exercise, exerciseIndex) => ({
