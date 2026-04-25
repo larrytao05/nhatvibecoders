@@ -32,8 +32,7 @@ sets/reps, and other granular details in a later step — this step exists to in
 - muscle_groups for each day must only contain values from this list:
   {", ".join(MUSCLE_GROUPS)}
 - Rest days have an empty muscle_groups list
-- Use the reasoning field to capture decisions (e.g. why this split, recovery considerations) \
-that should inform the exercise-selection step
+- reasoning: one short sentence only — the key split decision for exercise-selection context
 </constraints>"""
     return _ROLE, user
 
@@ -75,7 +74,7 @@ Planning notes: {day_plan.reasoning}
 <constraints>
 - Only select exercises from the available_exercises list above; do not invent new names
 - Specify realistic values: sets, reps, weight in lbs, rest_time in seconds
-- Use the notes field for brief form cues or exercise-specific guidance
+- notes: 3–5 words max, one key form cue only, or empty string if none needed
 - Choose exercise count and volume appropriate for the user's commitment and goals
 </constraints>"""
     return _ROLE, user
