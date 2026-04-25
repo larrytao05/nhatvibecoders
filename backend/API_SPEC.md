@@ -8,6 +8,14 @@ All endpoints are JSON. Error responses follow:
 { "error": "message" }
 ```
 
+## LLM configuration (Anthropic / Claude)
+
+Some endpoints call the LLM to generate or modify plans and to produce workout logs.
+
+- **Required env var**: `ANTHROPIC_API_KEY`
+  - The LLM client is `anthropic.AsyncAnthropic()` (it reads `ANTHROPIC_API_KEY` by default).
+- **Failure mode**: LLM call failures return **502** with `{ "error": "LLM call failed: ..." }`.
+
 ## Health
 
 ### `GET /`
@@ -127,11 +135,36 @@ List workouts for a user (newest first).
 
 - **404** if user not found
 
+### `POST /users/<username>/workouts/<workout_id>/complete`
+
+Mark a workout complete and generate an **LLM-produced** log entry (observations + suggested modifications).
+
+**Request**
+
+```json
+{
+  "regimen_id": 123,
+  "today_day": "Monday",
+  "health_metrics": { "sleep_hours": 7.5, "resting_hr": 58 }
+}
+```
+
+**Notes**
+- `workout_id` is an integer path param.
+- `health_metrics` is optional; defaults to `{}`.
+- The returned `modifications` are **RFC 6902 JSON Patch operations** that you may optionally apply to the regimen (see `POST /users/<username>/regimens/<regimen_id>/apply-patches`).
+
+**Responses**
+- **201** returns the created workout log entry
+- **400** if `regimen_id` missing/not int, `today_day` missing/blank, regimen has no plan
+- **404** if user/workout/regimen not found
+- **502** if LLM call fails
+
 ## Regimens
 
 ### `POST /users/<username>/regimens`
 
-Create a regimen for a user.
+Create a regimen for a user via an **LLM-generated** plan (two-phase HTN expansion).
 
 **Request**
 
@@ -140,18 +173,67 @@ Create a regimen for a user.
   "name": "Upper/Lower (4x)",
   "description": "Hypertrophy focus",
   "theme": "science-based",
-  "plan": { "weeks": 12, "days": ["Upper A", "Lower A", "Upper B", "Lower B"] }
+  "onboarding": {
+    "goals": ["fat loss", "strength"],
+    "equipment": ["barbell", "dumbbells"],
+    "experience": "beginner",
+    "days_per_week": 4,
+    "constraints": "knee pain"
+  }
 }
 ```
 
 **Responses**
 - **201** returns created regimen
-- **400** if `name` missing/blank, or `plan` is missing, or `plan` is not JSON-serializable
+- **400** if `name` missing/blank, or `onboarding` missing/not a non-empty object
 - **404** if user not found
+- **502** if LLM call fails
 
-## Not implemented yet
+### `PATCH /users/<username>/regimens/<regimen_id>`
 
-These routes exist but are currently placeholders:
+Modify an existing regimen via LLM-generated **RFC 6902** patches (patches are applied immediately server-side).
 
-- `PATCH /users/<username>/regimens/<regimen_id>`
-- `POST /users/<username>/workouts/<workout_id>/complete`
+**Request**
+
+```json
+{ "feedback": "Make it more powerlifting-focused and reduce volume on squats." }
+```
+
+**Responses**
+- **200** returns updated regimen plus `reasoning`
+- **400** if `feedback` missing/blank
+- **404** if user/regimen not found
+- **400** if regimen has no plan
+- **422** if the returned patches can’t be applied (response includes `patches` when applicable)
+- **502** if LLM call fails
+
+### `POST /users/<username>/regimens/<regimen_id>/apply-patches`
+
+Apply pre-computed RFC 6902 patches to a regimen (e.g. if the user accepts modifications suggested after completing a workout).
+
+**Request**
+
+```json
+{
+  "patches": [
+    { "op": "replace", "path": "/workouts/Tuesday/0/sets", "value": 3 }
+  ]
+}
+```
+
+**Responses**
+- **200** returns updated regimen
+- **400** if `patches` is not a list
+- **404** if user/regimen not found
+- **400** if regimen has no plan
+- **422** if patch application fails
+
+## Logs
+
+### `GET /users/<username>/logs`
+
+Return all workout log entries for a user (newest first).
+
+**Responses**
+- **200**
+- **404** if user not found
