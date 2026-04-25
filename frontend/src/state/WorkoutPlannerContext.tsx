@@ -12,6 +12,7 @@ import {
   logWorkout,
   requestRegimenTweak,
   requestWorkoutCompletion,
+  updateUserProfile,
 } from "../api/backend";
 import { getMockRegimen, getMockWorkoutById, getMockWorkouts } from "../mocks/api";
 import {
@@ -151,6 +152,12 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
           (workout) => !latestRegimen.plannedWorkouts.some((plannedWorkout) => plannedWorkout.id === workout.id),
         ),
       ]);
+      void expandMissingWorkoutDays(
+        authenticatedUser.username,
+        latestRegimen.regimen.id,
+        latestRegimen.regimen.plan.days,
+        latestRegimen.plannedWorkouts,
+      );
     } else {
       setRegimen(null);
       setWorkouts(baseWorkouts);
@@ -163,6 +170,31 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
       ...plannedWorkouts,
       ...previous.filter((workout) => !plannedWorkouts.some((plannedWorkout) => plannedWorkout.id === workout.id)),
     ]);
+  };
+
+  const expandMissingWorkoutDays = async (
+    username: string,
+    regimenId: number,
+    days: RegimenDay[],
+    plannedWorkouts: Workout[],
+  ) => {
+    const plannedWorkoutIds = new Set(plannedWorkouts.map((workout) => workout.id));
+    const daysToExpand = days.filter((day) => day.workout_id !== null && !plannedWorkoutIds.has(day.workout_id));
+
+    for (const day of daysToExpand) {
+      setExpandingDayIds((previous) => [...new Set([...previous, day.id])]);
+      try {
+        const expanded = await expandRegimenDay(username, regimenId, day.title);
+        setRegimen(expanded.regimen);
+        mergePlannedWorkouts(expanded.plannedWorkouts);
+        expanded.plannedWorkouts.forEach((workout) => plannedWorkoutIds.add(workout.id));
+      } catch (error) {
+        setGenerationError(error instanceof Error ? error.message : `Could not expand ${day.title}.`);
+        // Keep the skeleton visible if one day expansion fails.
+      } finally {
+        setExpandingDayIds((previous) => previous.filter((dayId) => dayId !== day.id));
+      }
+    }
   };
 
   const pointRegimenDayAtWorkout = (dayTitle: string, workoutId: number) => {
@@ -194,6 +226,8 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     const mockRegimen = await getMockRegimen();
 
     try {
+      const updatedUser = await updateUserProfile(username, onboarding);
+      setUser(updatedUser);
       const created = await createRegimenSkeleton(username, mockRegimen, onboarding);
       setRegimen(created.regimen);
       mergePlannedWorkouts(created.plannedWorkouts);
@@ -203,20 +237,7 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
         setIsAiProcessing(false);
       }
 
-      const trainingDays = created.regimen.plan.days.filter((day) => day.workout_id);
-      for (const day of trainingDays) {
-        setExpandingDayIds((previous) => [...new Set([...previous, day.id])]);
-        try {
-          const expanded = await expandRegimenDay(username, created.regimen.id, day.title);
-          setRegimen(expanded.regimen);
-          mergePlannedWorkouts(expanded.plannedWorkouts);
-        } catch (error) {
-          setGenerationError(error instanceof Error ? error.message : `Could not expand ${day.title}.`);
-          // Keep the skeleton visible if one day expansion fails.
-        } finally {
-          setExpandingDayIds((previous) => previous.filter((dayId) => dayId !== day.id));
-        }
-      }
+      await expandMissingWorkoutDays(username, created.regimen.id, created.regimen.plan.days, created.plannedWorkouts);
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : "Could not create regimen skeleton.");
       if (showBlockingOverlay) {
@@ -244,10 +265,9 @@ export function WorkoutPlannerProvider({ children }: { children: ReactNode }) {
     try {
       const authenticatedUser = await createUser(username.trim(), null, onboarding);
       setInitialMainTab("Workouts");
-      setOnboardingComplete(true);
+      setOnboardingComplete(false);
       await finishAuth(authenticatedUser);
       setIsAiProcessing(false);
-      void generateRegimenForUsername(authenticatedUser.username, false);
     } catch (error) {
       setIsAiProcessing(false);
       throw error;
