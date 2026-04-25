@@ -12,7 +12,7 @@
   "regimen": {
     "id": 101,
     "user_id": 1,
-    "name": "HTP Strength Recomposition",
+    "name": "Workout Plan",
     "description": "Seven-day macro-plan generated from pasted history, goals, equipment, and recovery bandwidth.",
     "theme": "strength_recomp",
     "plan": {
@@ -88,7 +88,7 @@
   "replacementRegimen": {
     "id": 102,
     "user_id": 1,
-    "name": "HTP Shoulder-Friendly Rebuild",
+    "name": "Shoulder-Friendly Rebuild",
     "description": "Adjusted plan after user feedback with lower pressing fatigue and more recovery spacing.",
     "theme": "adaptive_rebuild",
     "plan": {
