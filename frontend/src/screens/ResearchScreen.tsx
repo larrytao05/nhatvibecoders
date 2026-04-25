@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { API_BASE_URL } from "../api/backend";
 import { useWorkoutPlanner } from "../state/WorkoutPlannerContext";
 
-const API_BASE = "http://10.48.80.102:5050";
+const API_BASE = API_BASE_URL;
 
 interface ResearchResponse {
   direct_answer: string;
